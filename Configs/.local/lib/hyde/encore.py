@@ -66,6 +66,7 @@ HYPRLOCK_PATH = RUNTIME_DIR / "encore.hyprlock"
 TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
 OVERLAY_PIDFILE = RUNTIME_DIR / "encore-overlay.pid"
 STYLE_PATH = RUNTIME_DIR / "encore.style"
+GLOW_PIDFILE = RUNTIME_DIR / "encore-glow.pid"
 COVER_PATH = RUNTIME_DIR / "encore.cover.png"  # album art for hyprlock
 RUNTIME_FILES = (HYPRLOCK_PATH, TRACK_PATH, COVER_PATH)
 CACHE_DIR = xdg_cache_home() / "hyde" / "encore"
@@ -372,6 +373,40 @@ def run_toggle() -> int:
     return 0
 
 
+def run_glow_cmd() -> int:
+    os.environ.setdefault("GSK_RENDERER", "cairo")
+    from encorelib import single
+
+    if not single.claim(GLOW_PIDFILE):
+        print("encore glow is already running", file=sys.stderr)
+        return 0
+    try:
+        from encoregui.glow import run_glow
+
+        return run_glow(load_config(), str(RUNTIME_DIR))
+    finally:
+        single.release(GLOW_PIDFILE)
+
+
+def run_glow_toggle() -> int:
+    from encorelib import single
+
+    pid = single.read_pid(GLOW_PIDFILE)
+    if pid is not None and single.pid_alive(pid):
+        os.kill(pid, signal.SIGTERM)
+        print("encore glow off")
+        return 0
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encore.sh")
+    subprocess.Popen(
+        ["bash", script, "glow", "--run"],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    print("encore glow on")
+    return 0
+
+
 def run_style(name: str) -> int:
     from encorelib.stream import STYLES, read_style
 
@@ -437,6 +472,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("overlay", help="run the lyrics overlay (started via encore.sh)")
     sub.add_parser("toggle", help="show or hide the lyrics overlay")
+    glow = sub.add_parser("glow", help="toggle the screen-edge glow")
+    glow.add_argument("--run", action="store_true", help="run the glow process in the foreground")
     style = sub.add_parser("style", help="switch the overlay style (line, stack, constellation)")
     style.add_argument("name", nargs="?", default="next", help="style name, or 'next' to cycle")
     sub.add_parser("status", help="print the current state as JSON")
@@ -451,6 +488,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_toggle()
     if args.command == "style":
         return run_style(args.name)
+    if args.command == "glow":
+        return run_glow_cmd() if args.run else run_glow_toggle()
     if args.command == "status":
         print(json.dumps(read_state(SOCKET_PATH) or {"status": "stopped"}, ensure_ascii=False))
         return 0

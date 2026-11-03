@@ -18,6 +18,8 @@ See `docs/STATE.md`.
 - The album cover is run through HyDE's `wallbash.sh` to get a palette for the lyric highlight.
 - `hyde-shell encore status` prints the live state as JSON; the same JSON lines stream on `$XDG_RUNTIME_DIR/hyde/encore.sock`.
 - The `Encore` hyprlock layout shows the album art, title, artist and the lyric line with sung words highlighted.
+- `hyde-shell encore style next` cycles the overlay through three styles: `line` (karaoke strip), `stack` (huge centered words between dim serif neighbors) and `constellation` (the line scattered across the screen as a glowing word map with hairlines and sparkles).
+- `hyde-shell encore glow` toggles a screen-edge glow in the album color that pulses with the beat when HyDE's cava is running, and breathes softly without it.
 - `hyde-shell encore toggle` floats the current line above your windows: click-through, word-by-word feathered fill in the album accent, a baked glow and shadow, the next line dimmed below, and a slide-up cross-fade between lines.
   It hides itself during instrumental gaps and reconnects if the service restarts.
   Suggested bind: `hl.bind(MOD .. " + ALT + L", hl.dsp.exec_cmd("hyde-shell encore toggle"), {description = "[Utilities] toggle encore lyrics overlay"})` in `~/.config/hypr/hyprland.lua`.

@@ -89,6 +89,11 @@ default = ""
 description = "Monitor connector to show on, e.g. \"eDP-1\". Empty follows the compositor."
 type = "string"
 
+[properties.encore.properties.overlay.properties.style]
+default = "line"
+description = "Overlay style: line (karaoke strip), stack (big centered words) or constellation (scattered word map)."
+type = "string"
+
 [properties.encore.properties.hyprlock]
 description = "'hyde-shell encore hyprlock' configuration."
 type = "object"
