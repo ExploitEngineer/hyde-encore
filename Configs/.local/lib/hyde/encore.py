@@ -31,17 +31,25 @@ if _hyde_lib not in sys.path:
     sys.path.append(_hyde_lib)
 
 import pyutils.logger as hyde_logger
-from encorelib.cache import CACHED_MISS, LyricsCache
+from encorelib.cache import LyricsCache
 from encorelib.clock import PlaybackClock
 from encorelib.config import EncoreConfig, load_config
+from encorelib.lookup import lookup_lyrics
 from encorelib.palette import album_palette, fetch_art, wallpaper_palette
 from encorelib.protocol import StateServer, build_state, hyprlock_markup, read_state
-from encorelib.providers import TrackInfo, find_lyrics, track_key
-from encorelib.session import FetchGate, order_by_recency, pick_player
+from encorelib.providers import TrackInfo, track_key
+from encorelib.session import (
+    FetchGate,
+    guarded,
+    micros_to_seconds,
+    order_by_recency,
+    pick_player,
+)
 from encorelib.timing import NO_CURSOR, locate, with_words
 from pyutils.xdg_base_dirs import xdg_cache_home, xdg_runtime_dir
 
 logger = hyde_logger.get_logger()
+log = logging.getLogger("encore")  # errors always reach stderr / the journal
 
 RUNTIME_DIR = (xdg_runtime_dir() or Path(f"/run/user/{os.getuid()}")) / "hyde"
 SOCKET_PATH = RUNTIME_DIR / "encore.sock"
@@ -95,6 +103,7 @@ class Encore:
 
     # players -------------------------------------------------------------
 
+    @guarded()
     def add_player(self, name) -> None:
         player = self.Playerctl.Player.new_from_name(name)
         player.connect("playback-status", self.on_status)
@@ -102,6 +111,7 @@ class Encore:
         player.connect("seeked", self.on_seeked)
         self.manager.manage_player(player)
 
+    @guarded()
     def on_name_appeared(self, _manager, name) -> None:
         self.add_player(name)
         self.choose_player()
@@ -112,6 +122,7 @@ class Encore:
             and player.props.player_instance == self.player.props.player_instance
         )
 
+    @guarded()
     def on_player_vanished(self, _manager, player) -> None:
         if self.is_current(player):
             self.player = None
@@ -134,20 +145,23 @@ class Encore:
         self.refresh_track()
         self.refresh_playback()
 
+    @guarded()
     def on_status(self, player, _status) -> None:
         instance = player.props.player_instance
         if self.status_of(player) == "Playing":
             self.recent = [instance] + [i for i in self.recent if i != instance]
         self.choose_player()
 
+    @guarded()
     def on_metadata(self, player, _metadata) -> None:
         if self.is_current(player):
             self.refresh_track()
             self.refresh_playback()
 
+    @guarded()
     def on_seeked(self, player, position) -> None:
         if self.is_current(player):
-            self.clock.sync(position / 1e6, self.clock.playing)
+            self.clock.sync(micros_to_seconds(position), self.clock.playing)
             self.last_cursor = None
             self.publish()
 
@@ -165,12 +179,12 @@ class Encore:
             title=title,
             artist=self.player.get_artist() or "",
             album=self.player.get_album() or "",
-            length=(md.get("mpris:length") or 0) / 1e6,
-            url=md.get("xesam:url") or "",
+            length=micros_to_seconds(md.get("mpris:length")),
+            url=str(md.get("xesam:url") or ""),
             trackid=str(md.get("mpris:trackid") or ""),
             player=self.player.props.player_name,
         )
-        return info, md.get("mpris:artUrl") or ""
+        return info, str(md.get("mpris:artUrl") or "")
 
     def refresh_track(self) -> None:
         found = self.read_track()
@@ -193,15 +207,16 @@ class Encore:
         self.start_palette(info, art_url)
 
     def fetch_lyrics(self, info: TrackInfo, token: int) -> None:
+        """Worker thread: always reports back, even when a lookup blows up."""
         key = track_key(info)
-        lyrics = self.cache.get(key)
-        if lyrics is None:
-            lyrics = find_lyrics(info, self.cfg)
-            self.cache.put(key, lyrics)
-        elif lyrics == CACHED_MISS:
+        lyrics = None
+        try:
+            lyrics = lookup_lyrics(info, self.cfg, self.cache)
+            if lyrics is not None:
+                lyrics = with_words(lyrics)
+        except Exception:
+            log.exception("lyrics lookup failed")
             lyrics = None
-        if lyrics is not None:
-            lyrics = with_words(lyrics)
         self.GLib.idle_add(self.apply_lyrics, token, key, lyrics)
 
     def apply_lyrics(self, token: int, key: str, lyrics) -> bool:
@@ -217,8 +232,12 @@ class Encore:
         token = self.palette_gate.begin(track_key(info))
 
         def work():
-            art = fetch_art(art_url, CACHE_DIR / "art")
-            palette = album_palette(art, CACHE_DIR / "palette") if art else {}
+            art, palette = None, {}
+            try:
+                art = fetch_art(art_url, CACHE_DIR / "art")
+                palette = album_palette(art, CACHE_DIR / "palette") if art else {}
+            except Exception:
+                log.exception("album palette failed")
             self.GLib.idle_add(self.apply_palette, token, track_key(info), art, palette)
 
         threading.Thread(target=work, daemon=True).start()
@@ -251,6 +270,7 @@ class Encore:
         self.last_cursor = None
         self.publish()
 
+    @guarded(default=True)
     def tick(self) -> bool:
         self.ticks += 1
         if self.ticks % RESYNC_TICKS == 0 and self.player is not None:

@@ -52,3 +52,34 @@ def test_most_recently_started_player_wins_when_both_play():
     players = {"spotify": "Playing", "firefox": "Playing"}
     names = order_by_recency(list(players), ["firefox", "spotify"])
     assert pick_player([(n, players[n]) for n in names], ()) == "firefox"
+
+
+def test_guarded_logs_and_returns_default():
+    from encorelib.session import guarded
+
+    @guarded(default=True)
+    def tick():
+        raise OSError("disk full")
+
+    assert tick() is True
+
+
+def test_guarded_passes_through_normal_result():
+    from encorelib.session import guarded
+
+    @guarded(default=None)
+    def handler(x):
+        return x * 2
+
+    assert handler(4) == 8
+
+
+def test_micros_to_seconds_tolerates_odd_types():
+    from encorelib.session import micros_to_seconds
+
+    assert micros_to_seconds(213_000_000) == 213.0
+    assert micros_to_seconds("213000000") == 213.0
+    assert micros_to_seconds(2.5e6) == 2.5
+    assert micros_to_seconds(None) == 0.0
+    assert micros_to_seconds("garbage") == 0.0
+    assert micros_to_seconds(-5) == 0.0

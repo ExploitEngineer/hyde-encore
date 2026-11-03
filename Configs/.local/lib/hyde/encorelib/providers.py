@@ -109,6 +109,8 @@ def local_lrc(t: TrackInfo, search_dirs: Iterable[Path]) -> Lyrics | None:
 
 def _from_lrclib(record: dict) -> Lyrics | None:
     """Lyrics from one LRCLIB record, or None when it is missing or implausible."""
+    if not isinstance(record, dict):
+        raise ProviderError(f"unexpected LRCLIB record: {type(record).__name__}")
     if record.get("instrumental"):
         return Lyrics((), "none", "lrclib")
     if record.get("syncedLyrics"):
@@ -142,8 +144,12 @@ def lrclib(t: TrackInfo, fetch: Fetch = http_get) -> Lyrics | None:
         results = _json(fetch(f"{LRCLIB_URL}/search?{query}", {}))
     except NotFound:
         return None
-    for record in results if isinstance(results, list) else []:
-        duration = record.get("duration") or 0
+    if not isinstance(results, list):
+        raise ProviderError(f"unexpected LRCLIB search result: {type(results).__name__}")
+    for record in results:
+        if not isinstance(record, dict) or not isinstance(record.get("duration"), int | float):
+            continue
+        duration = record["duration"]
         if t.length <= 0 or abs(duration - t.length) <= DURATION_TOLERANCE:
             found = _from_lrclib(record)
             if found is not None:
@@ -195,7 +201,16 @@ def spicy(t: TrackInfo, key: str, fetch: Fetch = http_get) -> Lyrics | None:
         data = _json(fetch(f"{SPICY_URL}/{match.group(1)}", {"Authorization": f"Bearer {key}"}))
     except NotFound:
         return None
-    body = data.get("Body", data) if isinstance(data, dict) else {}
+    try:
+        return _parse_spicy(data)
+    except (AttributeError, KeyError, TypeError, ValueError, IndexError) as e:
+        raise ProviderError(f"malformed Spicy Lyrics response: {e}") from e
+
+
+def _parse_spicy(data) -> Lyrics:
+    if not isinstance(data, dict):
+        raise TypeError("response is not an object")
+    body = data.get("Body", data)
     kind = body.get("Type")
     source = body.get("source", "spicy")
     credit = _spicy_credit(body)
@@ -226,12 +241,26 @@ def _better(candidate: Lyrics | None, best: Lyrics | None) -> bool:
     return best is None or _RANK[candidate.sync] > _RANK[best.sync]
 
 
-def find_lyrics(t: TrackInfo, cfg: EncoreConfig, fetch: Fetch = http_get) -> Lyrics | None:
-    best = local_lrc(t, cfg.lyrics_dirs)
+def find_lyrics(
+    t: TrackInfo,
+    cfg: EncoreConfig,
+    fetch: Fetch = http_get,
+    errors: list[Exception] | None = None,
+    use_local: bool = True,
+) -> Lyrics | None:
+    """Best lyrics from all enabled sources.
+
+    Provider failures (network, HTTP, malformed payloads) are logged and, when
+    `errors` is given, appended to it so callers can avoid caching a result
+    that is only missing because a provider was unreachable.
+    """
+    errors = [] if errors is None else errors
+    best = local_lrc(t, cfg.lyrics_dirs) if use_local else None
     if best is None and cfg.lrclib:
         try:
             best = lrclib(t, fetch)
         except ProviderError as e:
+            errors.append(e)
             log.warning("lrclib failed: %s", e)
     if best is not None and best.sync == "word":
         return best
@@ -239,6 +268,7 @@ def find_lyrics(t: TrackInfo, cfg: EncoreConfig, fetch: Fetch = http_get) -> Lyr
         try:
             candidate = spicy(t, cfg.spicy_key, fetch)
         except ProviderError as e:
+            errors.append(e)
             log.warning("spicy lyrics failed: %s", e)
             candidate = None
         if _better(candidate, best):
