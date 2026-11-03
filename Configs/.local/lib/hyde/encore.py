@@ -65,6 +65,7 @@ SOCKET_PATH = RUNTIME_DIR / "encore.sock"
 HYPRLOCK_PATH = RUNTIME_DIR / "encore.hyprlock"
 TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
 OVERLAY_PIDFILE = RUNTIME_DIR / "encore-overlay.pid"
+STYLE_PATH = RUNTIME_DIR / "encore.style"
 COVER_PATH = RUNTIME_DIR / "encore.cover.png"  # album art for hyprlock
 RUNTIME_FILES = (HYPRLOCK_PATH, TRACK_PATH, COVER_PATH)
 CACHE_DIR = xdg_cache_home() / "hyde" / "encore"
@@ -371,6 +372,20 @@ def run_toggle() -> int:
     return 0
 
 
+def run_style(name: str) -> int:
+    from encorelib.stream import STYLES, read_style
+
+    current = read_style(STYLE_PATH) or load_config().overlay_style
+    if name == "next":
+        name = STYLES[(STYLES.index(current) + 1) % len(STYLES)]
+    if name not in STYLES:
+        print(f"unknown style {name!r}; one of: {', '.join(STYLES)}", file=sys.stderr)
+        return 1
+    write_atomic(STYLE_PATH, name + "\n")
+    print(name)
+    return 0
+
+
 def run_daemon(if_enabled: bool) -> int:
     from gi.repository import GLib
 
@@ -422,6 +437,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("overlay", help="run the lyrics overlay (started via encore.sh)")
     sub.add_parser("toggle", help="show or hide the lyrics overlay")
+    style = sub.add_parser("style", help="switch the overlay style (line, stack, constellation)")
+    style.add_argument("name", nargs="?", default="next", help="style name, or 'next' to cycle")
     sub.add_parser("status", help="print the current state as JSON")
     sub.add_parser("hyprlock", help="print the current lyric line as Pango markup")
     args = parser.parse_args(argv)
@@ -432,6 +449,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_overlay_cmd()
     if args.command == "toggle":
         return run_toggle()
+    if args.command == "style":
+        return run_style(args.name)
     if args.command == "status":
         print(json.dumps(read_state(SOCKET_PATH) or {"status": "stopped"}, ensure_ascii=False))
         return 0

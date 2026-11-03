@@ -25,9 +25,17 @@ from gi.repository import Gio, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
 from encorelib.config import EncoreConfig
-from encorelib.lyricview import HIDDEN, View, build_view, should_transition
+from encorelib.constellation import place_words, sparkles
+from encorelib.lyricview import (
+    HIDDEN,
+    View,
+    build_view,
+    current_word_index,
+    next_word_boundary,
+    should_transition,
+)
 from encorelib.palette import pick_accent
-from encorelib.stream import LineDecoder, should_connect
+from encorelib.stream import LineDecoder, read_style, should_connect
 from encorelib.wordrects import word_byte_ranges
 
 TRANSITION_SECONDS = 0.22
@@ -35,6 +43,11 @@ ANIMATE_MS = 33
 SLIDE_PX = 26
 FEATHER_PX = 26
 CREDIT_SECONDS = 10.0
+POP_SECONDS = 0.16
+STACK_SCALE = 2.1
+CONSTELLATION_SCALE = 1.5
+PAST_SCALE = 0.78
+SPARKS = 6
 RASTER_CACHE = 6
 WIDTH_FRACTION = 0.8
 
@@ -164,6 +177,13 @@ class Overlay:
         self.timeout_id = 0
         self.rasters: dict[tuple, LineRaster] = {}
         self.small: dict[tuple, LineRaster] = {}
+        self.word_cache: dict[tuple, tuple[cairo.ImageSurface, float, float]] = {}
+        self.style_path = os.path.join(runtime_dir, "encore.style")
+        self.style = read_style(self.style_path) or cfg.overlay_style
+        self.fade_from = 0.0
+        self.last_word_ix: int | None = None
+        self._last_fade_key = ""
+        self.places: dict[tuple, list[tuple[float, float]]] = {}
         self.decoder = LineDecoder()
         self.accent_rgb: tuple[float, float, float] = (1.0, 1.0, 1.0)
         self._accent_palette: dict | None = None
@@ -179,14 +199,7 @@ class Overlay:
         LayerShell.set_layer(self.window, LayerShell.Layer.OVERLAY)
         LayerShell.set_namespace(self.window, "encore")
         LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.NONE)
-        edge = {
-            "top": LayerShell.Edge.TOP,
-            "center": None,
-            "bottom": LayerShell.Edge.BOTTOM,
-        }[cfg.overlay_position]
-        if edge is not None:
-            LayerShell.set_anchor(self.window, edge, True)
-            LayerShell.set_margin(self.window, edge, cfg.overlay_margin)
+        self._apply_style_geometry()
         if cfg.overlay_monitor:
             display = self.window.get_display()
             monitors = display.get_monitors()
@@ -214,6 +227,30 @@ class Overlay:
         self.try_connect()
 
     # window ----------------------------------------------------------------
+
+    def _apply_style_geometry(self) -> None:
+        """A bottom/top strip for the line style; the whole output for
+        stack and constellation."""
+        full = self.style != "line"
+        edges = (
+            LayerShell.Edge.TOP,
+            LayerShell.Edge.BOTTOM,
+            LayerShell.Edge.LEFT,
+            LayerShell.Edge.RIGHT,
+        )
+        for edge in edges:
+            LayerShell.set_anchor(self.window, edge, full)
+            LayerShell.set_margin(self.window, edge, 0)
+        if not full:
+            edge = {
+                "top": LayerShell.Edge.TOP,
+                "center": None,
+                "bottom": LayerShell.Edge.BOTTOM,
+            }[self.cfg.overlay_position]
+            if edge is not None:
+                LayerShell.set_anchor(self.window, edge, True)
+                LayerShell.set_margin(self.window, edge, self.cfg.overlay_margin)
+        self._size_window()
 
     def _size_window(self) -> None:
         display = self.window.get_display()
@@ -247,8 +284,23 @@ class Overlay:
     def _on_dir_event(self, _monitor, child, _other, event) -> None:
         if event not in (Gio.FileMonitorEvent.CREATED, Gio.FileMonitorEvent.CHANGED):
             return
-        if should_connect(child.get_path() or ""):
+        path = child.get_path() or ""
+        if should_connect(path):
             self.try_connect()
+        if os.path.basename(path) == "encore.style":
+            self._reload_style()
+
+    def _reload_style(self) -> None:
+        style = read_style(self.style_path) or self.cfg.overlay_style
+        if style == self.style:
+            return
+        self.style = style
+        self.transition_from = None
+        self.prev_draw = None
+        self.last_word_ix = None
+        self.fade_from = 0.0
+        self._apply_style_geometry()
+        self.apply()
 
     def try_connect(self) -> None:
         if self.connection is not None or self.connecting:
@@ -338,15 +390,29 @@ class Overlay:
             self.timeout_id = 0
         if view.visible != self.window.get_visible():
             self.window.set_visible(view.visible)
-        in_transition = self.transition_from is not None
-        if view.visible and (view.animating or in_transition):
+        if self.style == "line":
+            in_transition = self.transition_from is not None
+            active = view.visible and (view.animating or in_transition)
+            wake = view.wake_in
+        else:
+            self.transition_from = None
+            self.prev_draw = None
+            ix = current_word_index(view) if view.visible else None
+            if view.visible and (ix, view.line_key) != (self.last_word_ix, self._last_fade_key):
+                self.last_word_ix = ix
+                self._last_fade_key = view.line_key
+                if ix is not None and ix >= 0:
+                    self.fade_from = now
+            active = view.visible and (now - self.fade_from) < POP_SECONDS
+            wake = next_word_boundary(self.state, now) if view.visible else None
+            if wake is None:
+                wake = view.wake_in
+        if active:
             self._ensure_anim()
         else:
             self._drop_anim()
-            if view.wake_in is not None:
-                self.timeout_id = GLib.timeout_add(
-                    max(16, int(view.wake_in * 1000) + 8), self._wake
-                )
+            if view.visible and wake is not None:
+                self.timeout_id = GLib.timeout_add(max(16, int(wake * 1000) + 8), self._wake)
         self.area.queue_draw()
 
     def _wake(self) -> bool:
@@ -375,7 +441,11 @@ class Overlay:
         view = build_view(self.state, now)
         changed_key = view.line_key != self.view.line_key
         self.view = view
-        if changed_key or not view.visible or not (view.animating or self.transition_from):
+        if self.style == "line":
+            still = view.animating or self.transition_from
+        else:
+            still = (now - self.fade_from) < POP_SECONDS
+        if changed_key or not view.visible or not still:
             self.anim_id = 0
             GLib.idle_add(self.apply)
             return False
@@ -481,9 +551,149 @@ class Overlay:
             cr.paint_with_alpha(alpha)
         cr.restore()
 
+    def _word_surface(self, text: str, size: int, rgb, dim: bool, italic: bool = False):
+        key = (text, size, rgb, dim, italic)
+        hit = self.word_cache.get(key)
+        if hit is not None:
+            return hit
+        scale = self.area.get_scale_factor() or 1
+        measure = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
+        layout = PangoCairo.create_layout(cairo.Context(measure))
+        family = "Serif" if italic else self.cfg.overlay_font
+        desc = Pango.FontDescription.from_string(family + (" Italic" if italic else " Bold"))
+        desc.set_absolute_size(size * Pango.SCALE)
+        layout.set_font_description(desc)
+        layout.set_text(text, -1)
+        _, logical = layout.get_pixel_extents()
+        w, h = logical.width + 14.0, logical.height + 14.0
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(w * scale), int(h * scale))
+        surface.set_device_scale(scale, scale)
+        cr2 = cairo.Context(surface)
+        cr2.translate(7, 7)
+        cr2.save()
+        cr2.translate(0, 2)
+        PangoCairo.layout_path(cr2, layout)
+        cr2.set_source_rgba(0, 0, 0, 0.5)
+        cr2.set_line_width(3.0)
+        cr2.stroke_preserve()
+        cr2.fill()
+        cr2.restore()
+        if not dim:
+            cr2.save()
+            PangoCairo.layout_path(cr2, layout)
+            cr2.set_source_rgba(*rgb, 0.18)
+            cr2.set_line_width(7.0)
+            cr2.stroke_preserve()
+            cr2.set_source_rgba(*rgb, 0.3)
+            cr2.set_line_width(3.0)
+            cr2.stroke()
+            cr2.restore()
+        cr2.set_source_rgba(*rgb, 0.55 if dim else 1.0)
+        cr2.move_to(0, 0)
+        PangoCairo.show_layout(cr2, layout)
+        out = (surface, w, h)
+        self.word_cache[key] = out
+        while len(self.word_cache) > 96:
+            self.word_cache.pop(next(iter(self.word_cache)))
+        return out
+
+    def _paint_word(self, cr, surface, w, h, cx, cy, alpha=1.0, scale=1.0):
+        cr.save()
+        cr.translate(cx, cy)
+        cr.scale(scale, scale)
+        cr.set_source_surface(surface, -w / 2, -h / 2)
+        cr.paint_with_alpha(alpha)
+        cr.restore()
+
+    def _pop(self, now: float) -> tuple[float, float]:
+        p = min(1.0, max(0.0, (now - self.fade_from) / POP_SECONDS))
+        eased = 1 - (1 - p) ** 3
+        return 0.35 + 0.65 * eased, 0.9 + 0.1 * eased
+
+    def _draw_stack(self, cr, width, height, view: View) -> None:
+        now = time.monotonic()
+        ix = current_word_index(view)
+        texts = [t for t, _ in view.words]
+        cy = height * 0.46
+        if 0 <= ix < len(texts):
+            surface, w, h = self._word_surface(
+                texts[ix], int(self.cfg.overlay_size * STACK_SCALE), self.accent_rgb, False
+            )
+            alpha, zoom = self._pop(now)
+            self._paint_word(cr, surface, w, h, width / 2, cy, alpha, zoom)
+            top, bottom = cy - h / 2, cy + h / 2
+        else:
+            top = bottom = cy
+        small = max(13, int(self.cfg.overlay_size * 0.85))
+        if ix > 0:
+            surface, w, h = self._word_surface(texts[ix - 1], small, (1, 1, 1), True, italic=True)
+            self._paint_word(cr, surface, w, h, width / 2, top - 18 - h / 2, 0.8)
+        if 0 <= ix + 1 < len(texts):
+            surface, w, h = self._word_surface(texts[ix + 1], small, (1, 1, 1), True, italic=True)
+            self._paint_word(cr, surface, w, h, width / 2, bottom + 18 + h / 2, 0.8)
+
+    def _positions(self, view: View, width, height):
+        key = (view.line_key, width, height)
+        hit = self.places.get(key)
+        if hit is None:
+            hit = place_words([t for t, _ in view.words], width, height, seed=view.line_key)
+            self.places[key] = hit
+            while len(self.places) > 8:
+                self.places.pop(next(iter(self.places)))
+        return hit
+
+    def _draw_constellation(self, cr, width, height, view: View) -> None:
+        now = time.monotonic()
+        ix = current_word_index(view)
+        if ix < 0:
+            return
+        texts = [t for t, _ in view.words]
+        positions = self._positions(view, width, height)
+        cr.set_line_width(1.0)
+        cr.set_source_rgba(1, 1, 1, 0.14)
+        for i in range(min(ix, len(positions) - 1)):
+            cr.move_to(*positions[i])
+            cr.line_to(*positions[i + 1])
+            cr.stroke()
+        spark, sw, sh = self._word_surface(
+            "✦", max(11, self.cfg.overlay_size // 2), (1, 1, 1), True
+        )
+        for sx, sy in sparkles(view.line_key, width, height, SPARKS):
+            self._paint_word(cr, spark, sw, sh, sx, sy, 0.5)
+        past = max(13, int(self.cfg.overlay_size * PAST_SCALE))
+        for i in range(ix):
+            surface, w, h = self._word_surface(texts[i], past, (1, 1, 1), True)
+            self._paint_word(cr, surface, w, h, *positions[i], 0.85)
+        surface, w, h = self._word_surface(
+            texts[ix], int(self.cfg.overlay_size * CONSTELLATION_SCALE), self.accent_rgb, False
+        )
+        alpha, zoom = self._pop(now)
+        self._paint_word(cr, surface, w, h, *positions[ix], alpha, zoom)
+
+    def _draw_credit(self, cr, width, height) -> None:
+        credit = self._credit_text()
+        if not credit:
+            return
+        raster = self._small_raster(credit, "credit")
+        if raster is None:
+            return
+        cr.save()
+        cr.translate(0, height - raster.height - 14)
+        cr.set_source_surface(raster.dim, 0, 0)
+        cr.paint_with_alpha(0.6)
+        cr.restore()
+
     def on_draw(self, _area, cr, width, height, *_):
         view = self.view
         if not view.visible:
+            return
+        if self.style == "stack":
+            self._draw_stack(cr, width, height, view)
+            self._draw_credit(cr, width, height)
+            return
+        if self.style == "constellation":
+            self._draw_constellation(cr, width, height, view)
+            self._draw_credit(cr, width, height)
             return
         raster = self._raster_for(view)
         if raster is None:
