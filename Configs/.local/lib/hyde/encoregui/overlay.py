@@ -31,6 +31,7 @@ from encorelib.stream import LineDecoder, should_connect
 from encorelib.wordrects import word_byte_ranges
 
 TRANSITION_SECONDS = 0.22
+ANIMATE_MS = 33
 SLIDE_PX = 26
 FEATHER_PX = 26
 CREDIT_SECONDS = 10.0
@@ -159,11 +160,13 @@ class Overlay:
         self.view: View = HIDDEN
         self.prev_draw: tuple[LineRaster, View] | None = None
         self.transition_from: float | None = None
-        self.tick_id = 0
+        self.anim_id = 0
         self.timeout_id = 0
         self.rasters: dict[tuple, LineRaster] = {}
         self.small: dict[tuple, LineRaster] = {}
         self.decoder = LineDecoder()
+        self.accent_rgb: tuple[float, float, float] = (1.0, 1.0, 1.0)
+        self._accent_palette: dict | None = None
         self.connection: Gio.SocketConnection | None = None
         self.cancel = Gio.Cancellable()
 
@@ -287,6 +290,14 @@ class Overlay:
 
     def apply(self) -> None:
         now = time.monotonic()
+        palette = (self.state or {}).get("palette") or {}
+        if palette is not self._accent_palette:
+            # pick_accent scans the palette; do it per state update, never per frame
+            self._accent_palette = palette
+            if self.cfg.overlay_color:
+                self.accent_rgb = _hex_rgb(self.cfg.overlay_color)
+            else:
+                self.accent_rgb = _hex_rgb(pick_accent(palette))
         view = build_view(self.state, now)
         if view.line_key != self.view.line_key and self.view.visible:
             raster = self._raster_for(self.view)
@@ -301,9 +312,9 @@ class Overlay:
             self.window.set_visible(view.visible)
         in_transition = self.transition_from is not None
         if view.visible and (view.animating or in_transition):
-            self._ensure_tick()
+            self._ensure_anim()
         else:
-            self._drop_tick()
+            self._drop_anim()
             if view.wake_in is not None:
                 self.timeout_id = GLib.timeout_add(
                     max(16, int(view.wake_in * 1000) + 8), self._wake
@@ -315,16 +326,20 @@ class Overlay:
         self.apply()
         return False
 
-    def _ensure_tick(self) -> None:
-        if not self.tick_id:
-            self.tick_id = self.area.add_tick_callback(self._tick)
+    def _ensure_anim(self) -> None:
+        # A plain 30 fps timer, not a frame-clock tick callback: an active
+        # tick callback makes GTK run its whole frame cycle at the monitor
+        # rate, which alone costs more than the drawing does. The feathered
+        # edge keeps the half-rate sweep looking continuous.
+        if not self.anim_id:
+            self.anim_id = GLib.timeout_add(ANIMATE_MS, self._animate)
 
-    def _drop_tick(self) -> None:
-        if self.tick_id:
-            self.area.remove_tick_callback(self.tick_id)
-            self.tick_id = 0
+    def _drop_anim(self) -> None:
+        if self.anim_id:
+            GLib.source_remove(self.anim_id)
+            self.anim_id = 0
 
-    def _tick(self, _area, _clock) -> bool:
+    def _animate(self) -> bool:
         now = time.monotonic()
         if self.transition_from is not None and now - self.transition_from > TRANSITION_SECONDS:
             self.transition_from = None
@@ -333,18 +348,16 @@ class Overlay:
         changed_key = view.line_key != self.view.line_key
         self.view = view
         if changed_key or not view.visible or not (view.animating or self.transition_from):
+            self.anim_id = 0
             GLib.idle_add(self.apply)
-            return GLib.SOURCE_REMOVE if not view.visible else GLib.SOURCE_CONTINUE
+            return False
         self.area.queue_draw()
-        return GLib.SOURCE_CONTINUE
+        return True
 
     # rendering -------------------------------------------------------------
 
     def _accent(self) -> tuple[float, float, float]:
-        if self.cfg.overlay_color:
-            return _hex_rgb(self.cfg.overlay_color)
-        palette = (self.state or {}).get("palette") or {}
-        return _hex_rgb(pick_accent(palette))
+        return self.accent_rgb
 
     def _raster_for(self, view: View) -> LineRaster | None:
         if not view.visible:
@@ -390,7 +403,9 @@ class Overlay:
     def _paint_line(self, cr, raster: LineRaster, view: View, y: float, alpha: float) -> None:
         cr.save()
         cr.translate(0, y)
-        cr.push_group()
+        grouped = alpha < 1.0
+        if grouped:  # only transitions need an offscreen composite
+            cr.push_group()
         cr.set_source_surface(raster.dim, 0, 0)
         cr.paint()
         full = []
@@ -428,8 +443,9 @@ class Overlay:
                 cr.set_source_surface(raster.bright, 0, 0)
                 cr.mask(gradient)
                 cr.restore()
-        cr.pop_group_to_source()
-        cr.paint_with_alpha(alpha)
+        if grouped:
+            cr.pop_group_to_source()
+            cr.paint_with_alpha(alpha)
         cr.restore()
 
     def on_draw(self, _area, cr, width, height, *_):
@@ -497,7 +513,7 @@ class Overlay:
 
     def shutdown(self) -> None:
         self.cancel.cancel()
-        self._drop_tick()
+        self._drop_anim()
 
 
 def run_overlay(cfg: EncoreConfig, runtime_dir: str) -> int:
