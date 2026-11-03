@@ -55,4 +55,4 @@
 - A `hyde-shell encore lrc` command to save the current lyrics as a local `.lrc` for offline use and hand-tuning.
 - Waybar module showing the current lyric line from `encore.sock`.
 
-verified: pending-showcase 2026-11-04
+verified: 553018d 2026-11-04
