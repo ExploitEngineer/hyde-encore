@@ -33,3 +33,11 @@ System `python3` has `python-gobject`, `playerctl` and `gtk4-layer-shell` typeli
 ## 9. 2026-11-03 - Autostart through HyDE's hc.start / [desktop.start] - Active
 encore starts like HyDE's other services: `hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-encore.service -t service -- encore.sh daemon --if-enabled`.
 The daemon exits at once unless `[encore] enable = true`, so the entry can ship enabled-by-config without starting anything by default.
+
+## 10. 2026-11-04 - Overlay renders with the cairo GSK renderer and cached line rasters - Active
+Measured on the owner's laptop at a steady 60 fps fill: cairo 6.8%, vulkan 11.8%, gl 15.0% of one core; cached dim/bright surfaces then halve the python cost.
+Animation runs on a 30 fps GLib timer because an active GTK tick callback forces the full frame cycle at 60 Hz; the feathered fill edge hides the half rate.
+
+## 11. 2026-11-04 - Overlay is a separate process from the daemon - Active
+`encore.sh overlay` needs LD_PRELOAD of gtk4-layer-shell and a GTK main loop; the daemon stays GTK-free and serves every client over encore.sock.
+A crash or toggle of the overlay never touches playback tracking.
