@@ -427,7 +427,9 @@ def run_look(key: str, value: str) -> int:
     from encorelib.look import MAX_SIZE, MIN_SIZE, update_look
 
     if key == "reset":
-        update_look(LOOK_PATH, style=None, font=None, size=None, color=None, next_line=None)
+        update_look(
+            LOOK_PATH, style=None, font=None, size=None, color=None, next_line=None, motion=None
+        )
         print("look reset to config")
         return 0
     change: dict
@@ -443,6 +445,8 @@ def run_look(key: str, value: str) -> int:
         change = {"color": None if value.lower() == "auto" else value}
     elif key == "next-line":
         change = {"next_line": value.lower() in ("1", "true", "on", "yes")}
+    elif key == "motion":
+        change = {"motion": value.lower() in ("1", "true", "on", "yes")}
     else:
         print("usage: encore look font|size|color|next-line|reset [value]", file=sys.stderr)
         return 1
@@ -491,8 +495,10 @@ def run_menu() -> int:
             f"Font: {look.get('font', 'config')}",
             f"Size: {look.get('size', 'config')}",
             f"Color: {look.get('color', 'auto')}",
+            f"Motion: {'on' if look.get('motion', True) else 'off'}",
             "Lyrics on/off",
             "Glow on/off",
+            f"Player: {state.get('player') or 'auto'}",
             "Reset look",
         ]
         picked = _rofi(entries, "encore", index=True)
@@ -535,11 +541,28 @@ def run_menu() -> int:
             if pick:
                 update_look(LOOK_PATH, color=None if pick == "auto" else pick.split()[0])
         elif row == 7:
-            run_toggle()
+            update_look(LOOK_PATH, motion=not look.get("motion", True))
         elif row == 8:
-            run_glow_toggle()
+            run_toggle()
         elif row == 9:
-            update_look(LOOK_PATH, style=None, font=None, size=None, color=None, next_line=None)
+            run_glow_toggle()
+        elif row == 10:
+            players = subprocess.run(
+                ["playerctl", "--list-all"], capture_output=True, text=True, check=False
+            ).stdout.split()
+            pick = _rofi(players, "give encore this player")
+            if pick:
+                subprocess.run(["playerctl", "-p", pick, "play"], check=False)
+        elif row == 11:
+            update_look(
+                LOOK_PATH,
+                style=None,
+                font=None,
+                size=None,
+                color=None,
+                next_line=None,
+                motion=None,
+            )
         else:
             return 0
 
@@ -602,7 +625,7 @@ def main(argv: list[str] | None = None) -> int:
     look = sub.add_parser(
         "look", help="change the overlay look live (font, size, color, next-line, reset)"
     )
-    look.add_argument("key", help="font | size | color | next-line | reset")
+    look.add_argument("key", help="font | size | color | next-line | motion | reset")
     look.add_argument("value", nargs="?", default="", help="new value ('auto' for color resets it)")
     sub.add_parser("menu", help="open the encore control menu (rofi)")
     sub.add_parser("status", help="print the current state as JSON")

@@ -32,7 +32,13 @@ def test_effective_overrides_config(tmp_path):
     cfg = EncoreConfig(
         overlay_style="line", overlay_font="JetBrainsMono Nerd Font", overlay_size=30
     )
-    look = {"style": "stack", "font": "Futura", "size": 44, "color": "#FF00AA", "next_line": False}
-    style, font, size, color, next_line = effective(cfg, look)
-    assert (style, font, size, color, next_line) == ("stack", "Futura", 44, "#FF00AA", False)
-    assert effective(cfg, {}) == ("line", "JetBrainsMono Nerd Font", 30, "", True)
+    look = {
+        "style": "stack",
+        "font": "Futura",
+        "size": 44,
+        "color": "#FF00AA",
+        "next_line": False,
+        "motion": False,
+    }
+    assert effective(cfg, look) == ("stack", "Futura", 44, "#FF00AA", False, False)
+    assert effective(cfg, {}) == ("line", "JetBrainsMono Nerd Font", 30, "", True, True)
