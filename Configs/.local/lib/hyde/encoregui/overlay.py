@@ -48,7 +48,7 @@ SLIDE_PX = 26
 FEATHER_PX = 26
 CREDIT_SECONDS = 10.0
 POP_SECONDS = 0.16
-SLIDE_SECONDS = 0.18
+SLIDE_SECONDS = 0.24
 EXIT_SECONDS = 0.26
 COLUMN_ROWS = 3
 CONSTELLATION_SCALE = 1.2
@@ -754,9 +754,13 @@ class Overlay:
         # ghost trails while the column slides
         offsets = [(0.0, 1.0)]
         if slide < 1.0 and self.motion:
+            # echo-depth ghosts (reference "Ship" look): 4 trailing copies
+            trail = row_h * (1 - slide) * 0.95
             offsets = [
-                (row_h * (1 - slide) * 0.66, 0.10),
-                (row_h * (1 - slide) * 0.33, 0.22),
+                (trail * 1.00, 0.10),
+                (trail * 0.72, 0.17),
+                (trail * 0.46, 0.26),
+                (trail * 0.22, 0.38),
                 (0.0, 1.0),
             ]
         for ghost_dy, ghost_alpha in offsets:

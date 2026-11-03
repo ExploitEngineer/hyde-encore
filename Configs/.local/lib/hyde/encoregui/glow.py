@@ -19,15 +19,18 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
-from gi.repository import Gio, GLib, Gtk
+from gi.repository import Gdk, Gio, GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
 from encorelib.config import EncoreConfig
 from encorelib.palette import pick_accent
 from encorelib.stream import LineDecoder
 
-THICKNESS = 110
-FRAME_MS = 50  # breathing is slow; beat attacks land on the next frame anyway
+THICKNESS = 130
+DOWNSCALE = 4
+FRAME_MS = (
+    80  # slow comets and breathing read smooth at 12 fps; 4 windows x 20 fps cost 12% of a core
+)
 BASE_ALPHA = 0.30
 BEAT_ALPHA = 0.55
 RELEASE = 0.90
@@ -129,40 +132,38 @@ class Glow:
         css = Gtk.CssProvider()
         css.load_from_string("window, window.background { background: transparent; }")
         display = None
-        for name, edge, sides in EDGES:
-            window = Gtk.ApplicationWindow(application=app)
-            LayerShell.init_for_window(window)
-            LayerShell.set_layer(window, LayerShell.Layer.OVERLAY)
-            LayerShell.set_namespace(window, f"encore-glow-{name}")
-            LayerShell.set_keyboard_mode(window, LayerShell.KeyboardMode.NONE)
+        # ONE click-through window over the whole output: a single GL frame
+        # per tick (four strip windows cost 4x the per-frame GTK overhead)
+        window = Gtk.ApplicationWindow(application=app)
+        LayerShell.init_for_window(window)
+        LayerShell.set_layer(window, LayerShell.Layer.OVERLAY)
+        LayerShell.set_namespace(window, "encore-glow")
+        LayerShell.set_keyboard_mode(window, LayerShell.KeyboardMode.NONE)
+        for _name, edge, _sides in EDGES:
             LayerShell.set_anchor(window, edge, True)
-            for side in sides:
-                LayerShell.set_anchor(window, side, True)
-            # cover the true screen edge, waybar and corners included
-            LayerShell.set_exclusive_zone(window, -1)
-            if name in ("top", "bottom"):
-                window.set_default_size(-1, THICKNESS)
-            else:
-                window.set_default_size(THICKNESS, -1)
-            if display is None:
-                display = window.get_display()
-                Gtk.StyleContext.add_provider_for_display(
-                    display, css, Gtk.STYLE_PROVIDER_PRIORITY_USER
-                )
-            area = Gtk.DrawingArea()
-            area.set_draw_func(self._draw, name)
-            window.set_child(area)
+        # cover the true screen edge, waybar and corners included
+        LayerShell.set_exclusive_zone(window, -1)
+        display = window.get_display()
+        Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        # a small texture stretched by the GPU: the CPU only rasterises
+        # 1/DOWNSCALE of the frame, GSK scales it with linear filtering
+        picture = Gtk.Picture()
+        picture.set_content_fit(Gtk.ContentFit.FILL)
+        picture.set_can_shrink(True)
+        picture.set_hexpand(True)
+        picture.set_vexpand(True)
+        window.set_child(picture)
 
-            def claim(win):
-                surface = win.get_surface()
-                if surface is not None:
-                    surface.set_input_region(cairo.Region())
+        def claim(win):
+            surface = win.get_surface()
+            if surface is not None:
+                surface.set_input_region(cairo.Region())
 
-            window.connect("realize", claim)
-            window.connect("map", claim)
-            window.present()
-            window.set_visible(False)  # nothing shows until the daemon speaks
-            self.windows.append((name, window, area))
+        window.connect("realize", claim)
+        window.connect("map", claim)
+        window.present()
+        window.set_visible(False)  # nothing shows until the daemon speaks
+        self.windows.append(("frame", window, picture))
 
         self.state_feed = _SocketFeed(
             os.path.join(runtime_dir, "encore.sock"),
@@ -244,29 +245,63 @@ class Glow:
         else:
             self.envelope *= RELEASE
         # the gradient flows along the edges, faster on the beat
-        self.phase = (self.phase + dt * (0.05 + 0.22 * self.envelope)) % 1.0
+        # comets lap the frame every ~10 s, faster on the beat
+        self.phase = (self.phase + dt * (0.09 + 0.25 * self.envelope)) % 1.0
         self._queue()
         return True
 
     def _queue(self) -> None:
-        for _, _window, area in self.windows:
-            area.queue_draw()
+        for _name, window, picture in self.windows:
+            if not window.get_visible():
+                continue
+            full_w = window.get_width() or 1920
+            full_h = window.get_height() or 1080
+            picture.set_paintable(self._frame_texture(full_w, full_h))
 
-    def _draw(self, _area, cr, width, height, name) -> None:
+    def _frame_texture(self, full_w: int, full_h: int) -> Gdk.Texture:
+        small_w = max(1, -(-full_w // DOWNSCALE))
+        small_h = max(1, -(-full_h // DOWNSCALE))
+        band = max(2, -(-THICKNESS // DOWNSCALE))
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, small_w, small_h)
+        cr = cairo.Context(surface)
+        cr.set_operator(cairo.OPERATOR_ADD)  # overlapping corners glow brighter
+        for name, (x, y, w, h) in (
+            ("top", (0, 0, small_w, band)),
+            ("bottom", (0, small_h - band, small_w, band)),
+            ("left", (0, 0, band, small_h)),
+            ("right", (small_w - band, 0, band, small_h)),
+        ):
+            cr.save()
+            cr.rectangle(x, y, w, h)
+            cr.clip()
+            cr.translate(x, y)
+            self._paint_strip(cr, w, h, name)
+            cr.restore()
+        surface.flush()
+        data = GLib.Bytes.new(bytes(surface.get_data()))
+        return Gdk.MemoryTexture.new(
+            small_w, small_h, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED, data, surface.get_stride()
+        )
+
+    def _paint_strip(self, cr, width, height, name) -> None:
         alpha = self._alpha()
         self.drawn_alpha = alpha
-        # color flowing along the edge between the two album accents
-        if name in ("top", "bottom"):
-            along = cairo.LinearGradient(0, 0, width, 0)
-        else:
-            along = cairo.LinearGradient(0, 0, 0, height)
-        for i in range(7):
-            t = i / 6
-            mix = 0.5 + 0.5 * math.sin(2 * math.pi * (t * 1.5 - self.phase))
+        horizontal = name in ("top", "bottom")
+        along = (
+            cairo.LinearGradient(0, 0, width, 0)
+            if horizontal
+            else cairo.LinearGradient(0, 0, 0, height)
+        )
+        stops = 13
+        for i in range(stops):
+            t = i / (stops - 1)
+            u = self._perimeter(name, t)
+            mix = 0.5 + 0.5 * math.sin(2 * math.pi * (u * 3 - self.phase))
             r = self.accent[0] * mix + self.accent2[0] * (1 - mix)
             g = self.accent[1] * mix + self.accent2[1] * (1 - mix)
             b = self.accent[2] * mix + self.accent2[2] * (1 - mix)
-            along.add_color_stop_rgba(t, r, g, b, 1.0)
+            strength = 0.45 + 0.55 * self._comet(u) if self.status == "playing" else 1.0
+            along.add_color_stop_rgba(t, r, g, b, strength)
         if name == "top":
             fade = cairo.LinearGradient(0, 0, 0, height)
         elif name == "bottom":
@@ -276,7 +311,7 @@ class Glow:
         else:
             fade = cairo.LinearGradient(width, 0, 0, 0)
         fade.add_color_stop_rgba(0.0, 1, 1, 1, alpha)
-        fade.add_color_stop_rgba(0.55, 1, 1, 1, alpha * 0.25)
+        fade.add_color_stop_rgba(0.5, 1, 1, 1, alpha * 0.28)
         fade.add_color_stop_rgba(1.0, 1, 1, 1, 0.0)
         cr.set_source(along)
         cr.mask(fade)
