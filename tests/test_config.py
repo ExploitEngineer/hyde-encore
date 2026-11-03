@@ -89,3 +89,45 @@ def test_hyprlock_colors(tmp_path):
     env = {**HOME, "ENCORE_HYPRLOCK_COLOR": "#ff0000", "ENCORE_HYPRLOCK_DIM": "#ffffff80"}
     cfg = load_config(env=env, env_file=tmp_path / "x")
     assert (cfg.hyprlock_color, cfg.hyprlock_dim) == ("#ff0000", "#ffffff80")
+
+
+def test_overlay_defaults(tmp_path):
+    cfg = load_config(env=HOME, env_file=tmp_path / "missing")
+    assert cfg.overlay_enable is False
+    assert cfg.overlay_position == "bottom"
+    assert cfg.overlay_margin == 120
+    assert cfg.overlay_font == "JetBrainsMono Nerd Font"
+    assert cfg.overlay_size == 30
+    assert cfg.overlay_next_line is True
+    assert cfg.overlay_color == ""
+    assert cfg.overlay_monitor == ""
+
+
+def test_overlay_env_names(tmp_path):
+    env = {
+        **HOME,
+        "ENCORE_OVERLAY_ENABLE": "1",
+        "ENCORE_OVERLAY_POSITION": "top",
+        "ENCORE_OVERLAY_MARGIN": "64",
+        "ENCORE_OVERLAY_FONT": '"Inter"',
+        "ENCORE_OVERLAY_SIZE": "40",
+        "ENCORE_OVERLAY_NEXT_LINE": "false",
+        "ENCORE_OVERLAY_COLOR": "#AABBCC",
+        "ENCORE_OVERLAY_MONITOR": "eDP-1",
+    }
+    cfg = load_config(env=env, env_file=tmp_path / "x")
+    assert cfg.overlay_enable is True
+    assert cfg.overlay_position == "top"
+    assert cfg.overlay_margin == 64
+    assert cfg.overlay_font == "Inter"
+    assert cfg.overlay_size == 40
+    assert cfg.overlay_next_line is False
+    assert cfg.overlay_color == "#AABBCC"
+    assert cfg.overlay_monitor == "eDP-1"
+
+
+def test_overlay_bad_values_fall_back(tmp_path):
+    env = {**HOME, "ENCORE_OVERLAY_MARGIN": "wide", "ENCORE_OVERLAY_POSITION": "left"}
+    cfg = load_config(env=env, env_file=tmp_path / "x")
+    assert cfg.overlay_margin == 120
+    assert cfg.overlay_position == "bottom"
