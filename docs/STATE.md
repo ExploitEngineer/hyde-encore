@@ -20,4 +20,4 @@
 ## Ideas
 - None yet.
 
-verified: scaffold 2026-11-03
+verified: 24d17c3 2026-11-03
