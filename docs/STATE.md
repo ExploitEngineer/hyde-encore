@@ -20,11 +20,15 @@
 - Lyrics overlay: GTK4 layer-shell, click-through, per-word feathered fill in the album accent, baked glow and shadow, dimmed next line, Spicy credit (first 10 s per track and while paused), slide-up cross-fade within a track, flock single-instance, `hyde-shell encore toggle`.
 - Measured: animating ~6% of one core at a 30 fps sweep, paused and hidden 0%; 171 tests.
 
+## Shipped (reel parity, 2026-11-04, branch feat/encore-parity, PR #6)
+- Frame-stepped audit of all 7 reels into `docs/superpowers/specs/2026-11-04-verci-parity.md`; reels kept locally in gitignored `.reference/`.
+- Stack/visual rolling column with ghost slides and per-word font mix; chain constellation with cluster fade; `visual` style (full-bleed art + glyphs); card v2 with pill controls.
+- Post-ship review owed for polish AND parity branches (deadline shipped both review-light).
+
 ## Shipped (polish, 2026-11-04, branch feat/encore-polish)
 - Glow v2: covers the true screen edge including waybar and corners (exclusive zone -1), two-accent gradient flowing along the edges, faster on the beat.
 - Text motion: constellation drift and stack breathe while playing, `motion` look key and menu row (default on).
 - Menu: Motion row and Player picker row (hand encore any MPRIS player).
-- Post-ship review of this branch still owed (owner deadline shipped it review-light).
 
 ## Shipped (Plan 3, 2026-11-04, branch feat/encore-showcase)
 - Overlay styles `stack` and `constellation` (live switch via `hyde-shell encore style`), matching the Verci reel looks; word-boundary scheduling, paused/hidden cost 0.
@@ -61,4 +65,4 @@
 - A `hyde-shell encore lrc` command to save the current lyrics as a local `.lrc` for offline use and hand-tuning.
 - Waybar module showing the current lyric line from `encore.sock`.
 
-verified: 553018d 2026-11-04
+verified: a3776fa 2026-11-04
