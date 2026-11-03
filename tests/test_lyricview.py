@@ -131,3 +131,36 @@ def test_should_transition_needs_both_keys():
 
     assert should_transition("", "cafe01:0") is False
     assert should_transition("cafe01:0", "") is False
+
+
+def test_current_word_index():
+    from encorelib.lyricview import current_word_index
+
+    v = build_view(state(position=10.5), 1000.0)
+    assert current_word_index(v) == 0
+    v = build_view(state(position=12.4), 1000.0)
+    assert current_word_index(v) == 1
+    v = build_view(
+        state(
+            position=9.0,
+            line={
+                "index": 3,
+                "start": 10.0,
+                "end": 30.0,
+                "words": [{"text": "one", "start": 10.0, "end": 11.0}],
+            },
+        ),
+        1000.0,
+    )
+    assert current_word_index(v) == -1
+
+
+def test_next_word_boundary_mid_word_and_between():
+    from encorelib.lyricview import next_word_boundary
+
+    assert next_word_boundary(state(), 1000.0) == pytest.approx(0.5)  # end of "one"
+    assert next_word_boundary(state(position=11.5), 1000.0) == pytest.approx(0.5)  # start of "two"
+    assert next_word_boundary(state(position=11.5, rate=2.0), 1000.0) == pytest.approx(0.25)
+    assert next_word_boundary(state(position=13.5), 1000.0) is None  # after last word
+    assert next_word_boundary(state(status="paused"), 1000.0) is None
+    assert next_word_boundary(None, 1000.0) is None

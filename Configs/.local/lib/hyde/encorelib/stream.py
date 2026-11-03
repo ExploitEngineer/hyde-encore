@@ -36,3 +36,16 @@ class LineDecoder:
 def should_connect(event_path: str, socket_name: str = "encore.sock") -> bool:
     """True when a runtime-dir file event is about the daemon's socket."""
     return os.path.basename(event_path) == socket_name
+
+
+STYLES = ("line", "stack", "constellation")
+
+
+def read_style(path) -> str | None:
+    """The live style override written by `hyde-shell encore style`, if valid."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            value = f.read().strip().lower()
+    except OSError:
+        return None
+    return value if value in STYLES else None

@@ -131,3 +131,11 @@ def test_overlay_bad_values_fall_back(tmp_path):
     cfg = load_config(env=env, env_file=tmp_path / "x")
     assert cfg.overlay_margin == 120
     assert cfg.overlay_position == "bottom"
+
+
+def test_overlay_style(tmp_path):
+    assert load_config(env=HOME, env_file=tmp_path / "x").overlay_style == "line"
+    env = {**HOME, "ENCORE_OVERLAY_STYLE": "Constellation"}
+    assert load_config(env=env, env_file=tmp_path / "x").overlay_style == "constellation"
+    env = {**HOME, "ENCORE_OVERLAY_STYLE": "wave"}
+    assert load_config(env=env, env_file=tmp_path / "x").overlay_style == "line"

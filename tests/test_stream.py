@@ -36,3 +36,14 @@ def test_should_connect_on_socket_only():
     assert should_connect("/run/user/1000/hyde/encore.sock") is True
     assert should_connect("/run/user/1000/hyde/encore.hyprlock") is False
     assert should_connect("/run/user/1000/hyde/cava.sock") is False
+
+
+def test_read_style(tmp_path):
+    from encorelib.stream import read_style
+
+    p = tmp_path / "encore.style"
+    assert read_style(p) is None
+    p.write_text("stack\n")
+    assert read_style(p) == "stack"
+    p.write_text("WAVE")
+    assert read_style(p) is None

@@ -89,3 +89,26 @@ def should_transition(old_key: str, new_key: str) -> bool:
     if not old_key or not new_key or old_key == new_key:
         return False
     return old_key.rsplit(":", 1)[0] == new_key.rsplit(":", 1)[0]
+
+
+def current_word_index(view: View) -> int:
+    """Index of the word being (or last) sung, -1 before the first word."""
+    index = -1
+    for i, (_, fill) in enumerate(view.words):
+        if fill > 0.0:
+            index = i
+    return index
+
+
+def next_word_boundary(state: dict | None, now: float) -> float | None:
+    """Wall seconds until the next word start or end, while playing."""
+    if not state or state.get("status") != "playing":
+        return None
+    line = state.get("line") or {}
+    words = line.get("words") or []
+    position = live_position(state, now)
+    rate = state.get("rate", 1.0) or 1.0
+    boundaries = [b for w in words for b in (w["start"], w["end"]) if b > position]
+    if not boundaries:
+        return None
+    return (min(boundaries) - position) / rate
