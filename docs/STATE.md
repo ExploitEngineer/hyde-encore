@@ -5,15 +5,20 @@
 - `encore.py` daemon plus `encore.sh` hyde-shell entry: follows the most recently started MPRIS player, worker-thread fetches guarded against stale results, `daemon [--if-enabled]`, `status`, `hyprlock`.
 - `Encore.conf` hyprlock layout; schema, config and `hc.start` autostart fragments for upstream.
 - Lookup rules (`encorelib/lookup.py`): local `.lrc` always wins and is never cached; provider errors are never cached; cache key includes enabled sources.
-- 125 unit tests; `tests/e2e/fake_mpris.py` scriptable MPRIS player for end-to-end runs.
+- 134 unit tests; `tests/e2e/fake_mpris.py` scriptable MPRIS player for end-to-end runs.
 
 ## Measured (fake MPRIS player, this laptop, 2026-11-03)
 - Playing: about 0.4% of one core, about 40 MB RSS.
 - Paused: 0 CPU ticks over 10 s; 0 to 1.4 context switches per second across runs, 0 on the latest run.
 - E2E verified: word-by-word line follows playback, seek forward and back lands within 0.3 s, three fast skips end on the right song, two players hand over correctly, clean shutdown removes runtime files.
 
+## Verified with the owner (2026-11-04)
+- Real Spotify: follows Spotify over a stopped Brave tab; Spicy Lyrics word sync on "LEGACY (slowed down)" lights word by word in time.
+- `Encore` hyprlock preview on screen: real cover, title, artist, word-by-word line, readable colors.
+
 ## In progress
-- Owner checks still open: real Spotify session, and the `Encore` hyprlock layout on screen (preview and real lock).
+- Branch `fix/hyprlock-layout`: encore-provided cover/title/artist for hyprlock, contrast-aware accent, layout spacing. Not merged yet.
+- Auto-lyrics (vocal separation + Whisper) spike parked: owner confirmed the target song has no lyrics anywhere; revisit later. Venv and recording live in `~/.cache/hyde/encore/autosync/`.
 
 ## Known gaps (deferred from review)
 - Empty artist still sends `artist_name=` to LRCLIB search; no `feat.`-stripped retry.
@@ -27,6 +32,8 @@
 - Plan 3: edge glow from HyDE's `cava.py` socket. Plan 4: `follow_album` spike and full-theme recolor.
 
 ## Known facts
+- HyDE upstream bugs found (candidate small PRs): `hyprlock.sh find_filepath` uses `find -type f` without `-L`, so symlinked layouts are listed but fail to load; `hyprlock.sh fn_mpris` reads the first listed player, not the playing one.
+- Owner's Spicy Lyrics key lives in `~/.config/hyde/config.toml` (mode 600, not tracked by dotfiles).
 - This laptop's `~/.config/hyde/config.toml` only has `$schema`, so `config.lua` writes no `~/.local/state/hyde/config`; that file appears once any setting (such as `[encore]`) is added. Not a HyDE bug.
 - LRCLIB `/api/get` can return junk uploads (single `probe` line); encore rejects synced results under 4 timed lines and falls back to search.
 - Spicy Lyrics schema read from the OpenAPI document embedded in its docs page; parser unverified against a live response until the owner adds a key.
@@ -39,4 +46,4 @@
 - A `hyde-shell encore lrc` command to save the current lyrics as a local `.lrc` for offline use and hand-tuning.
 - Waybar module showing the current lyric line from `encore.sock`.
 
-verified: db72dca 2026-11-03
+verified: 61abec8 2026-11-04
