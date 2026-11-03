@@ -4,17 +4,12 @@
 - Repo scaffold, docs, HyDE-mirrored tree (empty).
 
 ## In progress
-- Nothing.
+- Design doc `docs/superpowers/specs/2026-11-03-hyde-encore-design.md`, under builder review, then owner approval.
 
 ## Next
-- Answer open design questions (below).
-- Study upstream: `cava.py`, `mediaplayer.py`, `pyutils`, `pygui`, `hyprlock.sh`, wallbash `always/` templates, `CONTRIBUTING.md`.
-- Pick overlay tech HyDE would accept (GTK layer-shell in Python vs extending existing pieces).
-- Write design doc, then plan.
+- Owner approves design, then implementation plan (superpowers:writing-plans).
 
 ## Open questions
-- Video moment: empty desktop or working among windows (overlay vs underlay)?
-- Lyrics timing source: Musixmatch richsync (ToS gray) vs Spicy Lyrics key vs estimated.
 - Final name (working name: hyde-encore).
 
 ## Ideas
