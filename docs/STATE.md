@@ -20,6 +20,12 @@
 - Lyrics overlay: GTK4 layer-shell, click-through, per-word feathered fill in the album accent, baked glow and shadow, dimmed next line, Spicy credit (first 10 s per track and while paused), slide-up cross-fade within a track, flock single-instance, `hyde-shell encore toggle`.
 - Measured: animating ~6% of one core at a 30 fps sweep, paused and hidden 0%; 171 tests.
 
+## Shipped (player + RE parity, 2026-11-04, branch feat/encore-player)
+- RE of the public reference assets (REA browser capture of verci.xyz / trylumn.xyz): official hero video, styles and settings screenshots, Lumn demo; findings in the parity spec.
+- Player window (SUPER+ALT+M): reference layout, lyrics mode with scrolling list, hover-expand, look menu (3-color system), glow popover wired live into the glow.
+- Visual/stack column rebuilt to the reference semantics: sung word on a sweeping Highlight marker at the bottom, previous word big, older small; drum tilt; height-relative sizing.
+- Perf: visual 85% -> 11%, stack 42% -> 9% of a core (isolated harness).
+
 ## Shipped (setup, 2026-11-04, branch feat/encore-setup)
 - Settings window (GTK4, floats top-right via window rule): sound setup profiles, style list, installed fonts, size slider + reset, Auto Sync + album swatches, motion/next-line/glow/lyrics switches.
 - Profiles `working` (line, still, glow off) and `show` (visual, motion, glow on); `encore show` toggles the empty `encore` workspace with the show profile.

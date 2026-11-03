@@ -17,6 +17,7 @@ from .config import EncoreConfig
 from .stream import STYLES
 
 MIN_SIZE, MAX_SIZE = 14, 72
+GLOW_ANIMATIONS = ("music", "breathe", "static")
 _COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -29,9 +30,24 @@ def _valid(key: str, value) -> bool:
         return (
             isinstance(value, int) and not isinstance(value, bool) and MIN_SIZE <= value <= MAX_SIZE
         )
-    if key == "color":
+    if key in (
+        "color",
+        "lyric_color",
+        "highlight_color",
+        "secondary_color",
+        "glow_primary",
+        "glow_secondary",
+    ):
         return isinstance(value, str) and bool(_COLOR.match(value))
-    if key in ("next_line", "motion"):
+    if key == "glow_colors":
+        return value in (1, 2) and not isinstance(value, bool)
+    if key == "glow_animation":
+        return value in GLOW_ANIMATIONS
+    if key == "glow_thickness":
+        return isinstance(value, int) and not isinstance(value, bool) and 40 <= value <= 220
+    if key == "glow_intensity":
+        return isinstance(value, int) and not isinstance(value, bool) and 10 <= value <= 100
+    if key in ("next_line", "motion", "glow_override"):
         return isinstance(value, bool)
     return False
 

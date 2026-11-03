@@ -46,7 +46,13 @@ def test_build_state_schema():
         "art": "/c.png",
     }
     assert len(state["track"]["key"]) == 40
-    assert state["lyrics"] == {"sync": "word", "source": "lrclib", "credit": None}
+    assert state["lyrics"]["sync"] == "word"
+    assert state["lyrics"]["source"] == "lrclib"
+    assert state["lyrics"]["credit"] is None
+    assert state["lyrics"]["lines"] == [
+        {"start": 10.0, "text": "one two three"},
+        {"start": 14.0, "text": "next line"},
+    ]
     assert state["position"] == 11.5
     assert state["rate"] == 1.0
     assert state["line"]["index"] == 0

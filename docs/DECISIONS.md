@@ -55,3 +55,11 @@ One click-through window composes all four edges into a 1/4-resolution frame tex
 
 ## 15. 2026-11-04 - Settings window and sound-setup profiles - Active
 A GTK4 panel (`hyde-shell encore menu`, SUPER+ALT+M) modelled on the reference app replaces the rofi menu (kept as `menu --rofi`); profiles `working` and `show` set look keys and the glow state; `encore show` (SUPER+ALT+E) toggles an empty `encore` workspace running the show profile.
+
+## 16. 2026-11-04 - Three reference UIs, built separately - Active (supersedes the settings panel in #15)
+RE of the public reference assets showed three different UIs: the lyrics look menu, the player window, and the glow settings popover.
+`hyde-shell encore menu` (SUPER+ALT+M) now opens the player window; its palette button opens the look menu (styles, fonts, size, Lyric Text / Highlight / Secondary colors), its Settings pill opens the glow popover (gradient, animation, thickness, glow, override colors, display).
+
+## 17. 2026-11-04 - Column styles render for steady 1:1 blits; visual art is its own layer - Active
+Visual cost 85% of a core: words re-typeset at interpolated sizes every frame and big bitmaps went through cairo's convolution filter with skew.
+Words now rasterize per target slot with the drum tilt baked in, steady frames blit 1:1 at integer positions, slides use bilinear, and the album art sits in a separate TOP-layer window that never redraws: visual 11%, stack 9%.

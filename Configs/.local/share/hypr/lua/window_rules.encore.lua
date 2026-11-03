@@ -1,15 +1,14 @@
 -- Fragment for upstream Configs/.local/share/hypr/lua/window_rules.lua.
--- The encore settings panel floats like a menu, docked at the top right.
+-- The encore player is a floating, centered app window.
 hl.window_rule(
   {
-    name = "encore_settings",
+    name = "encore_player",
     match = {
-      class = "^org\\.hyde\\.encore\\.settings$"
+      class = "^org\\.hyde\\.encore\\.player$"
     },
     float = true,
-    pin = true,
-    size = "360 (monitor_h*0.82)",
-    move = "(monitor_w-380) 56",
+    center = true,
+    size = "960 660",
     opacity = "1.0 override 1.0 override"
   }
 )

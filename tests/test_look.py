@@ -41,4 +41,49 @@ def test_effective_overrides_config(tmp_path):
         "motion": False,
     }
     assert effective(cfg, look) == ("stack", "Futura", 44, "#FF00AA", False, False)
-    assert effective(cfg, {}) == ("line", "JetBrainsMono Nerd Font", 30, "", True, True)
+    assert effective(cfg, {}) == (
+        "line",
+        "JetBrainsMono Nerd Font",
+        30,
+        "",
+        True,
+        True,
+    )
+
+
+def test_color_trio_and_glow_keys(tmp_path):
+    p = tmp_path / "encore.look"
+    update_look(
+        p,
+        lyric_color="#F2A7C3",
+        highlight_color="#C2185B",
+        secondary_color="#A87C9A",
+        glow_colors=2,
+        glow_animation="breathe",
+        glow_thickness=160,
+        glow_intensity=80,
+        glow_override=True,
+        glow_primary="#3355FF",
+        glow_secondary="#AA00FF",
+    )
+    look = read_look(p)
+    assert look["highlight_color"] == "#C2185B"
+    assert look["glow_colors"] == 2
+    assert look["glow_animation"] == "breathe"
+    assert look["glow_thickness"] == 160
+    assert look["glow_intensity"] == 80
+    assert look["glow_override"] is True
+    assert look["glow_secondary"] == "#AA00FF"
+
+
+def test_glow_keys_rejected_out_of_range(tmp_path):
+    p = tmp_path / "encore.look"
+    update_look(
+        p,
+        glow_colors=3,
+        glow_animation="disco",
+        glow_thickness=5,
+        glow_intensity=500,
+        lyric_color="pink",
+    )
+    assert read_look(p) == {}
