@@ -4,10 +4,11 @@
 - Repo scaffold, docs, HyDE-mirrored tree (empty).
 
 ## In progress
-- Design doc `docs/superpowers/specs/2026-11-03-hyde-encore-design.md`, under builder review, then owner approval.
+- Design approved 2026-11-03. Plan 1 (core daemon, lyrics engine, hyprlock) written.
 
 ## Next
-- Owner approves design, then implementation plan (superpowers:writing-plans).
+- Owner reviews Plan 1 `docs/superpowers/plans/2026-11-03-encore-core.md`, then execute inline.
+- Plans 2-4 (overlay, glow, follow_album) written after Plan 1 ships.
 
 ## Open questions
 - Final name (working name: hyde-encore).
