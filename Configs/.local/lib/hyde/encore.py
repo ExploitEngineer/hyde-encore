@@ -18,6 +18,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import signal
 import sys
 import tempfile
@@ -35,8 +36,15 @@ from encorelib.cache import LyricsCache
 from encorelib.clock import PlaybackClock
 from encorelib.config import EncoreConfig, load_config
 from encorelib.lookup import lookup_lyrics
-from encorelib.palette import album_palette, fetch_art, wallpaper_palette
-from encorelib.protocol import StateServer, build_state, hyprlock_markup, read_state
+from encorelib.palette import album_palette, cover_png, fetch_art, wallpaper_palette
+from encorelib.protocol import (
+    StateServer,
+    build_state,
+    hyprlock_colors,
+    hyprlock_markup,
+    hyprlock_track,
+    read_state,
+)
 from encorelib.providers import TrackInfo, track_key
 from encorelib.session import (
     FetchGate,
@@ -54,6 +62,9 @@ log = logging.getLogger("encore")  # errors always reach stderr / the journal
 RUNTIME_DIR = (xdg_runtime_dir() or Path(f"/run/user/{os.getuid()}")) / "hyde"
 SOCKET_PATH = RUNTIME_DIR / "encore.sock"
 HYPRLOCK_PATH = RUNTIME_DIR / "encore.hyprlock"
+TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
+COVER_PATH = RUNTIME_DIR / "encore.cover.png"  # album art for hyprlock
+RUNTIME_FILES = (HYPRLOCK_PATH, TRACK_PATH, COVER_PATH)
 CACHE_DIR = xdg_cache_home() / "hyde" / "encore"
 
 TICK_MS = 50
@@ -89,6 +100,7 @@ class Encore:
         self.lyrics = None
         self.art: Path | None = None
         self.palette: dict[str, str] = wallpaper_palette()
+        self.shown_cover: Path | None = None
         self.tick_id = 0
         self.ticks = 0
         self.recent: list[str] = []
@@ -234,8 +246,10 @@ class Encore:
         def work():
             art, palette = None, {}
             try:
-                art = fetch_art(art_url, CACHE_DIR / "art")
-                palette = album_palette(art, CACHE_DIR / "palette") if art else {}
+                original = fetch_art(art_url, CACHE_DIR / "art")
+                if original:
+                    palette = album_palette(original, CACHE_DIR / "palette")
+                    art = cover_png(original, CACHE_DIR / "covers") or original
             except Exception:
                 log.exception("album palette failed")
             self.GLib.idle_add(self.apply_palette, token, track_key(info), art, palette)
@@ -289,13 +303,28 @@ class Encore:
             return "stopped"
         return "playing" if self.clock.playing else "paused"
 
+    def show_cover(self) -> None:
+        """Keep COVER_PATH in step with the current track's art (copied, so hyprlock
+        sees a new mtime); removed while there is no art so the layout falls back."""
+        cover = self.art if self.track is not None else None
+        if cover == self.shown_cover:
+            return
+        self.shown_cover = cover
+        if cover is None:
+            COVER_PATH.unlink(missing_ok=True)
+            return
+        tmp = COVER_PATH.with_suffix(".tmp.png")
+        shutil.copyfile(cover, tmp)
+        os.replace(tmp, COVER_PATH)
+
     def publish(self) -> None:
         cursor = locate(self.lyrics, self.clock.position()) if self.lyrics else NO_CURSOR
         self.last_cursor = (cursor.line, cursor.word)
-        accent = self.cfg.hyprlock_color or "#" + self.palette.get("1xa8", "FFFFFF")
-        dim = self.cfg.hyprlock_dim or "#" + self.palette.get("txt1", "FFFFFF") + "80"
+        accent, dim = hyprlock_colors(self.cfg, self.palette)
         markup = hyprlock_markup(self.lyrics, cursor, accent, dim) if self.track else ""
         write_atomic(HYPRLOCK_PATH, markup + "\n" if markup else "")
+        write_atomic(TRACK_PATH, hyprlock_track(self.track))
+        self.show_cover()
         self.server.broadcast(
             build_state(self.status(), self.track, self.art, self.lyrics, self.clock, self.palette)
         )
@@ -336,7 +365,8 @@ def run_daemon(if_enabled: bool) -> int:
         loop.run()
     finally:
         server.close()
-        HYPRLOCK_PATH.unlink(missing_ok=True)
+        for path in RUNTIME_FILES:
+            path.unlink(missing_ok=True)
     return 0
 
 

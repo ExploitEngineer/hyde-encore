@@ -192,3 +192,29 @@ def test_server_refuses_second_instance(tmp_path):
         assert raised
     finally:
         first.close()
+
+
+def test_hyprlock_track_lines_escaped():
+    from encorelib.protocol import hyprlock_track
+
+    track = TrackInfo("Rock & Roll <3", "AC/DC", "", 0, "", "", "spotify")
+    assert hyprlock_track(track) == "Rock &amp; Roll &lt;3\nAC/DC\n"
+    assert hyprlock_track(None) == ""
+
+
+def test_hyprlock_colors_defaults_from_palette():
+    from encorelib.config import EncoreConfig
+    from encorelib.protocol import hyprlock_colors
+
+    accent, dim = hyprlock_colors(EncoreConfig(), {"1xa8": "CAAAF0", "txt1": "09090A"})
+    assert accent == "#CAAAF0"
+    assert dim == "#FFFFFF66"  # soft white at 40%, never the palette's (maybe dark) text color
+
+
+def test_hyprlock_colors_config_wins_and_fallback():
+    from encorelib.config import EncoreConfig
+    from encorelib.protocol import hyprlock_colors
+
+    cfg = EncoreConfig(hyprlock_color="#FF0000", hyprlock_dim="#00FF0080")
+    assert hyprlock_colors(cfg, {}) == ("#FF0000", "#00FF0080")
+    assert hyprlock_colors(EncoreConfig(), {}) == ("#FFFFFF", "#FFFFFF66")

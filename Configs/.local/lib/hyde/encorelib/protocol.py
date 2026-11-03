@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .clock import PlaybackClock
 from .model import Lyrics
+from .palette import pick_accent
 from .providers import TrackInfo, track_key
 from .timing import Cursor, locate
 
@@ -173,3 +174,26 @@ def read_state(path: Path, timeout: float = 0.3) -> dict | None:
         return json.loads(line) if line else None
     except (OSError, ValueError):
         return None
+
+
+DIM_ALPHA = "66"  # unsung words at 40% opacity
+
+
+def hyprlock_colors(cfg, palette: dict[str, str]) -> tuple[str, str]:
+    """(sung, unsung) colors for the hyprlock line.
+
+    Config wins. Otherwise sung words take the most vivid palette accent that
+    is readable on the dark lock screen, and unsung words are soft white.
+    """
+    accent = cfg.hyprlock_color or "#" + pick_accent(palette)
+    dim = cfg.hyprlock_dim or "#FFFFFF" + DIM_ALPHA
+    return accent, dim
+
+
+def hyprlock_track(track: TrackInfo | None) -> str:
+    """Title and artist on two lines, escaped for hyprlock's Pango labels."""
+    if track is None:
+        return ""
+    title = html.escape(track.title, quote=False)
+    artist = html.escape(track.artist, quote=False)
+    return f"{title}\n{artist}\n"

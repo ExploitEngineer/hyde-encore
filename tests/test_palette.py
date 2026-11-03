@@ -104,3 +104,69 @@ def test_wallpaper_palette(tmp_path):
     (tmp_path / "hyde" / "wall.dcol").write_text('dcol_pry1="000000"\n')
     assert wallpaper_palette(tmp_path) == {"pry1": "000000"}
     assert wallpaper_palette(tmp_path / "none") == {}
+
+
+def test_cover_png_resizes_once_per_image(tmp_path):
+    from encorelib.palette import cover_png
+
+    art = tmp_path / "a.img"
+    art.write_bytes(b"jpeg")
+    calls = []
+
+    def run(cmd):
+        calls.append(cmd)
+        Path(cmd[-1]).write_bytes(b"png")
+        return 0
+
+    first = cover_png(art, tmp_path / "covers", run)
+    second = cover_png(art, tmp_path / "covers", run)
+    assert first == second
+    assert first.suffix == ".png"
+    assert len(calls) == 1
+    assert calls[0][0] == "magick" and "512x512" in " ".join(calls[0])
+
+
+def test_cover_png_failure_is_none(tmp_path):
+    from encorelib.palette import cover_png
+
+    art = tmp_path / "a.img"
+    art.write_bytes(b"jpeg")
+    assert cover_png(art, tmp_path / "covers", lambda cmd: 1) is None
+
+
+def _contrast(hex_a, hex_b):
+    from encorelib.palette import contrast_ratio
+
+    return contrast_ratio(hex_a, hex_b)
+
+
+def test_pick_accent_light_mode_palette_is_readable_and_vivid():
+    from encorelib.palette import LOCK_BACKGROUND, pick_accent
+
+    pal = parse_dcol((FIXTURES / "light_mode.dcol").read_text())
+    accent = pick_accent(pal)
+    assert accent != "6B593A"  # the dark 1xa8 shade this palette would give
+    assert _contrast(accent, LOCK_BACKGROUND) >= 7.0
+    r, g, b = (int(accent[i : i + 2], 16) for i in (0, 2, 4))
+    assert max(r, g, b) - min(r, g, b) >= 40  # a real color, not a grey
+
+
+def test_pick_accent_dark_mode_palette_keeps_its_accent():
+    from encorelib.palette import LOCK_BACKGROUND, pick_accent
+
+    pal = parse_dcol((FIXTURES / "sample.dcol").read_text())
+    accent = pick_accent(pal)
+    assert _contrast(accent, LOCK_BACKGROUND) >= 7.0
+
+
+def test_pick_accent_greyscale_and_empty():
+    from encorelib.palette import pick_accent
+
+    grey = {"1xa8": "D6D6D6", "1xa2": "2B2B2B", "txt1": "FFFFFF"}
+    assert pick_accent(grey) == "D6D6D6"
+    assert pick_accent({}) == "FFFFFF"
+
+
+def test_contrast_ratio_extremes():
+    assert round(_contrast("FFFFFF", "000000"), 1) == 21.0
+    assert _contrast("777777", "777777") == 1.0
