@@ -5,7 +5,7 @@
 # the system python3 instead. See docs/DECISIONS.md #8.
 # gtk4-layer-shell must be loaded before libwayland-client, so the overlay
 # subcommand preloads it.
-if [ "$1" = "overlay" ]; then
+if [ "$1" = "overlay" ] || [ "$1" = "glow" ]; then
     export LD_PRELOAD="/usr/lib/libgtk4-layer-shell.so${LD_PRELOAD:+:$LD_PRELOAD}"
 fi
 exec python3 "$(dirname "${BASH_SOURCE[0]}")/encore.py" "$@"

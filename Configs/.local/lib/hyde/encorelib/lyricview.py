@@ -89,3 +89,32 @@ def should_transition(old_key: str, new_key: str) -> bool:
     if not old_key or not new_key or old_key == new_key:
         return False
     return old_key.rsplit(":", 1)[0] == new_key.rsplit(":", 1)[0]
+
+
+def current_word_index(view: View) -> int:
+    """Index of the word being (or last) sung, -1 before the first word."""
+    index = -1
+    for i, (_, fill) in enumerate(view.words):
+        if fill > 0.0:
+            index = i
+    return index
+
+
+def next_word_boundary(state: dict | None, now: float) -> float | None:
+    """Wall seconds until the next word start or end, while playing."""
+    if not state or state.get("status") != "playing":
+        return None
+    line = state.get("line") or {}
+    words = line.get("words") or []
+    position = live_position(state, now)
+    rate = state.get("rate", 1.0) or 1.0
+    # only word STARTS change what is on screen; ends inside a line do not,
+    # except the LAST end, which starts the gap-hide countdown
+    boundaries = [w["start"] for w in words if w["start"] > position]
+    if boundaries:
+        return (min(boundaries) - position) / rate
+    if words:
+        hide_at = words[-1]["end"] + GAP_HIDE_SECONDS
+        if position < hide_at:
+            return (hide_at - position) / rate
+    return None

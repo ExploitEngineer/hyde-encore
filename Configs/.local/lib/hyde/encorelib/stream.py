@@ -36,3 +36,6 @@ class LineDecoder:
 def should_connect(event_path: str, socket_name: str = "encore.sock") -> bool:
     """True when a runtime-dir file event is about the daemon's socket."""
     return os.path.basename(event_path) == socket_name
+
+
+STYLES = ("line", "stack", "constellation")

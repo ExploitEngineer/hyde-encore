@@ -65,6 +65,8 @@ SOCKET_PATH = RUNTIME_DIR / "encore.sock"
 HYPRLOCK_PATH = RUNTIME_DIR / "encore.hyprlock"
 TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
 OVERLAY_PIDFILE = RUNTIME_DIR / "encore-overlay.pid"
+LOOK_PATH = RUNTIME_DIR / "encore.look"
+GLOW_PIDFILE = RUNTIME_DIR / "encore-glow.pid"
 COVER_PATH = RUNTIME_DIR / "encore.cover.png"  # album art for hyprlock
 RUNTIME_FILES = (HYPRLOCK_PATH, TRACK_PATH, COVER_PATH)
 CACHE_DIR = xdg_cache_home() / "hyde" / "encore"
@@ -371,6 +373,177 @@ def run_toggle() -> int:
     return 0
 
 
+def run_glow_cmd() -> int:
+    os.environ.setdefault("GSK_RENDERER", "cairo")
+    from encorelib import single
+
+    if not single.claim(GLOW_PIDFILE):
+        print("encore glow is already running", file=sys.stderr)
+        return 0
+    try:
+        from encoregui.glow import run_glow
+
+        return run_glow(load_config(), str(RUNTIME_DIR))
+    finally:
+        single.release(GLOW_PIDFILE)
+
+
+def run_glow_toggle() -> int:
+    from encorelib import single
+
+    pid = single.read_pid(GLOW_PIDFILE)
+    if pid is not None and single.pid_alive(pid):
+        os.kill(pid, signal.SIGTERM)
+        print("encore glow off")
+        return 0
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encore.sh")
+    subprocess.Popen(
+        ["bash", script, "glow", "--run"],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    print("encore glow on")
+    return 0
+
+
+def run_style(name: str) -> int:
+    name = name.strip().lower()
+    from encorelib.look import read_look, update_look
+    from encorelib.stream import STYLES
+
+    current = read_look(LOOK_PATH).get("style") or load_config().overlay_style
+    if name == "next":
+        name = STYLES[(STYLES.index(current) + 1) % len(STYLES)]
+    if name not in STYLES:
+        print(f"unknown style {name!r}; one of: {', '.join(STYLES)}", file=sys.stderr)
+        return 1
+    update_look(LOOK_PATH, style=name)
+    print(name)
+    return 0
+
+
+def run_look(key: str, value: str) -> int:
+    from encorelib.look import MAX_SIZE, MIN_SIZE, update_look
+
+    if key == "reset":
+        update_look(LOOK_PATH, style=None, font=None, size=None, color=None, next_line=None)
+        print("look reset to config")
+        return 0
+    change: dict
+    if key == "font":
+        change = {"font": value}
+    elif key == "size":
+        try:
+            change = {"size": int(value)}
+        except ValueError:
+            print(f"size must be {MIN_SIZE}-{MAX_SIZE}", file=sys.stderr)
+            return 1
+    elif key == "color":
+        change = {"color": None if value.lower() == "auto" else value}
+    elif key == "next-line":
+        change = {"next_line": value.lower() in ("1", "true", "on", "yes")}
+    else:
+        print("usage: encore look font|size|color|next-line|reset [value]", file=sys.stderr)
+        return 1
+    before = dict(change)
+    after = update_look(LOOK_PATH, **change)
+    for k, v in before.items():
+        if v is not None and after.get(k) != v:
+            print(f"rejected {k}={v!r}", file=sys.stderr)
+            return 1
+    print(json.dumps(after))
+    return 0
+
+
+def _rofi(entries: list[str], prompt: str, index: bool = False) -> str:
+    """Run a rofi dmenu; with index=True the selected row NUMBER is returned."""
+    cmd = ["rofi", "-dmenu", "-i", "-p", prompt]
+    if index:
+        cmd += ["-format", "i"]
+    try:
+        result = subprocess.run(
+            cmd, input="\n".join(entries), capture_output=True, text=True, check=False
+        )
+    except FileNotFoundError:
+        print("encore menu needs rofi", file=sys.stderr)
+        return ""
+    return result.stdout.strip()
+
+
+def run_menu() -> int:
+    """The encore control menu: playback, style, font, size, color, toggles."""
+    from encorelib.look import read_look, update_look
+    from encorelib.protocol import read_state
+    from encorelib.stream import STYLES
+
+    while True:
+        look = read_look(LOOK_PATH)
+        state = read_state(SOCKET_PATH) or {}
+        track = state.get("track") or {}
+        now = f"{track.get('title', '')} - {track.get('artist', '')}".strip(" -")
+        style = look.get("style") or load_config().overlay_style
+        entries = [
+            f"Play / Pause{('   (' + now + ')') if now else ''}",
+            "Next track",
+            "Previous track",
+            f"Style: {style}",
+            f"Font: {look.get('font', 'config')}",
+            f"Size: {look.get('size', 'config')}",
+            f"Color: {look.get('color', 'auto')}",
+            "Lyrics on/off",
+            "Glow on/off",
+            "Reset look",
+        ]
+        picked = _rofi(entries, "encore", index=True)
+        try:
+            row = int(picked)
+        except ValueError:
+            return 0
+        if row == 0:
+            subprocess.run(["playerctl", "play-pause"], check=False)
+        elif row == 1:
+            subprocess.run(["playerctl", "next"], check=False)
+        elif row == 2:
+            subprocess.run(["playerctl", "previous"], check=False)
+        elif row == 3:
+            pick = _rofi(list(STYLES), "style")
+            if pick:
+                run_style(pick)
+        elif row == 4:
+            fonts = subprocess.run(
+                ["fc-list", ":", "family"], capture_output=True, text=True, check=False
+            ).stdout
+            families = sorted(
+                {line.split(",")[0].strip() for line in fonts.splitlines() if line.strip()}
+            )
+            pick = _rofi(families, "font")
+            if pick:
+                update_look(LOOK_PATH, font=pick)
+        elif row == 5:
+            pick = _rofi([str(n) for n in range(18, 58, 4)], "size")
+            if pick.isdigit():
+                update_look(LOOK_PATH, size=int(pick))
+        elif row == 6:
+            palette = state.get("palette") or {}
+            swatches = ["auto"] + [
+                f"#{palette[k]}  ({k})"
+                for k in ("1xa8", "2xa8", "3xa8", "4xa8", "txt1")
+                if k in palette
+            ]
+            pick = _rofi(swatches, "color (hex or auto)")
+            if pick:
+                update_look(LOOK_PATH, color=None if pick == "auto" else pick.split()[0])
+        elif row == 7:
+            run_toggle()
+        elif row == 8:
+            run_glow_toggle()
+        elif row == 9:
+            update_look(LOOK_PATH, style=None, font=None, size=None, color=None, next_line=None)
+        else:
+            return 0
+
+
 def run_daemon(if_enabled: bool) -> int:
     from gi.repository import GLib
 
@@ -422,6 +595,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("overlay", help="run the lyrics overlay (started via encore.sh)")
     sub.add_parser("toggle", help="show or hide the lyrics overlay")
+    glow = sub.add_parser("glow", help="toggle the screen-edge glow")
+    glow.add_argument("--run", action="store_true", help="run the glow process in the foreground")
+    style = sub.add_parser("style", help="switch the overlay style (line, stack, constellation)")
+    style.add_argument("name", nargs="?", default="next", help="style name, or 'next' to cycle")
+    look = sub.add_parser(
+        "look", help="change the overlay look live (font, size, color, next-line, reset)"
+    )
+    look.add_argument("key", help="font | size | color | next-line | reset")
+    look.add_argument("value", nargs="?", default="", help="new value ('auto' for color resets it)")
+    sub.add_parser("menu", help="open the encore control menu (rofi)")
     sub.add_parser("status", help="print the current state as JSON")
     sub.add_parser("hyprlock", help="print the current lyric line as Pango markup")
     args = parser.parse_args(argv)
@@ -432,6 +615,14 @@ def main(argv: list[str] | None = None) -> int:
         return run_overlay_cmd()
     if args.command == "toggle":
         return run_toggle()
+    if args.command == "style":
+        return run_style(args.name)
+    if args.command == "look":
+        return run_look(args.key, args.value)
+    if args.command == "menu":
+        return run_menu()
+    if args.command == "glow":
+        return run_glow_cmd() if args.run else run_glow_toggle()
     if args.command == "status":
         print(json.dumps(read_state(SOCKET_PATH) or {"status": "stopped"}, ensure_ascii=False))
         return 0

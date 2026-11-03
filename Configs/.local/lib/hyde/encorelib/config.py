@@ -35,6 +35,7 @@ class EncoreConfig:
     overlay_next_line: bool = True
     overlay_color: str = ""
     overlay_monitor: str = ""
+    overlay_style: str = "line"
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -143,4 +144,7 @@ def load_config(env: Mapping[str, str] | None = None, env_file: Path | None = No
         overlay_next_line=_as_bool(get("ENCORE_OVERLAY_NEXT_LINE"), True),
         overlay_color=_unquote(get("ENCORE_OVERLAY_COLOR") or ""),
         overlay_monitor=_unquote(get("ENCORE_OVERLAY_MONITOR") or ""),
+        overlay_style=_as_choice(
+            get("ENCORE_OVERLAY_STYLE"), ("line", "stack", "constellation"), "line"
+        ),
     )
