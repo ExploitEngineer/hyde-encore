@@ -38,4 +38,4 @@ def should_connect(event_path: str, socket_name: str = "encore.sock") -> bool:
     return os.path.basename(event_path) == socket_name
 
 
-STYLES = ("line", "stack", "constellation")
+STYLES = ("line", "stack", "constellation", "visual")

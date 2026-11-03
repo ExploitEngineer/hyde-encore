@@ -26,7 +26,8 @@ from gi.repository import Gio, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
 from encorelib.config import EncoreConfig
-from encorelib.constellation import place_words, sparkles
+from encorelib.constellation import chain_words
+from encorelib.glyphs import glyph_for
 from encorelib.look import effective, read_look
 from encorelib.lyricview import (
     HIDDEN,
@@ -47,10 +48,11 @@ SLIDE_PX = 26
 FEATHER_PX = 26
 CREDIT_SECONDS = 10.0
 POP_SECONDS = 0.16
-STACK_SCALE = 2.1
-CONSTELLATION_SCALE = 1.5
-PAST_SCALE = 0.78
-SPARKS = 6
+SLIDE_SECONDS = 0.18
+EXIT_SECONDS = 0.26
+COLUMN_ROWS = 3
+CONSTELLATION_SCALE = 1.2
+PAST_SCALE = 0.55
 RASTER_CACHE = 6
 WIDTH_FRACTION = 0.8
 
@@ -191,6 +193,9 @@ class Overlay:
             self.motion,
         ) = effective(cfg, read_look(self.look_path))
         self.fade_from = 0.0
+        self.slide_from = 0.0
+        self.exit_from = 0.0
+        self.exit_snapshot: tuple | None = None
         self.last_word_ix: int | None = None
         self._last_fade_key = ""
         self.places: dict[tuple, list[tuple[float, float]]] = {}
@@ -433,13 +438,29 @@ class Overlay:
             self.prev_draw = None
             ix = current_word_index(view) if view.visible else None
             if view.visible and (ix, view.line_key) != (self.last_word_ix, self._last_fade_key):
+                if view.line_key != self._last_fade_key and self.view.visible and self.view.words:
+                    # line change: let the old cluster fade out as a whole
+                    old_ix = current_word_index(self.view)
+                    self.exit_snapshot = (
+                        self._last_fade_key,
+                        [t for t, _ in self.view.words],
+                        old_ix,
+                    )
+                    self.exit_from = now
+                elif ix is not None and self.last_word_ix is not None and ix > self.last_word_ix:
+                    self.slide_from = now
                 self.last_word_ix = ix
                 self._last_fade_key = view.line_key
                 if ix is not None and ix >= 0:
                     self.fade_from = now
             playing = (self.state or {}).get("status") == "playing"
             drifting = self.motion and view.visible and playing
-            active = view.visible and ((now - self.fade_from) < POP_SECONDS or drifting)
+            in_motion = (
+                (now - self.fade_from) < POP_SECONDS
+                or (now - self.slide_from) < SLIDE_SECONDS
+                or self.exit_snapshot is not None
+            )
+            active = view.visible and (in_motion or drifting)
             wake = next_word_boundary(self.state, now) if view.visible else None
             if wake is None:
                 wake = view.wake_in
@@ -483,13 +504,25 @@ class Overlay:
             ix = current_word_index(view) if view.visible else None
             if view.visible and (ix, view.line_key) != (self.last_word_ix, self._last_fade_key):
                 # a fast word started inside the previous pop: restart the pop
+                if (
+                    view.line_key == self._last_fade_key
+                    and ix is not None
+                    and self.last_word_ix is not None
+                    and ix > self.last_word_ix
+                ):
+                    self.slide_from = now
                 self.last_word_ix = ix
                 self._last_fade_key = view.line_key
                 if ix is not None and ix >= 0:
                     self.fade_from = now
             playing = (self.state or {}).get("status") == "playing"
-            still = (now - self.fade_from) < POP_SECONDS or (
-                self.motion and view.visible and playing
+            if self.exit_snapshot is not None and now - self.exit_from >= EXIT_SECONDS:
+                self.exit_snapshot = None
+            still = (
+                (now - self.fade_from) < POP_SECONDS
+                or (now - self.slide_from) < SLIDE_SECONDS
+                or self.exit_snapshot is not None
+                or (self.motion and view.visible and playing)
             )
         if changed_key or not view.visible or not still:
             self.anim_id = 0
@@ -597,30 +630,38 @@ class Overlay:
             cr.paint_with_alpha(alpha)
         cr.restore()
 
-    def _word_surface(self, text: str, size: int, rgb, dim: bool, italic: bool = False):
-        key = (text, size, rgb, dim, italic)
+    def _word_surface(self, text: str, size: int, rgb, dim: bool, style: str = "bold"):
+        """A rendered word with baked shadow (and glow when bright).
+
+        style: "bold" (our font), "serif" (italic serif) or "medium".
+        """
+        key = (text, size, rgb, dim, style)
         hit = self.word_cache.get(key)
         if hit is not None:
             return hit
         scale = self.area.get_scale_factor() or 1
         measure = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
         layout = PangoCairo.create_layout(cairo.Context(measure))
-        family = "Serif" if italic else self.font
-        desc = Pango.FontDescription.from_string(family + (" Italic" if italic else " Bold"))
+        if style == "serif":
+            desc = Pango.FontDescription.from_string("Serif Italic")
+        elif style == "medium":
+            desc = Pango.FontDescription.from_string(self.font + " Medium")
+        else:
+            desc = Pango.FontDescription.from_string(self.font + " Bold")
         desc.set_absolute_size(size * Pango.SCALE)
         layout.set_font_description(desc)
         layout.set_text(text, -1)
         _, logical = layout.get_pixel_extents()
-        w, h = logical.width + 14.0, logical.height + 14.0
+        w, h = logical.width + 16.0, logical.height + 16.0
         surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(w * scale), int(h * scale))
         surface.set_device_scale(scale, scale)
         cr2 = cairo.Context(surface)
-        cr2.translate(7, 7)
+        cr2.translate(8, 8)
         cr2.save()
         cr2.translate(0, 2)
         PangoCairo.layout_path(cr2, layout)
         cr2.set_source_rgba(0, 0, 0, 0.5)
-        cr2.set_line_width(3.0)
+        cr2.set_line_width(3.5)
         cr2.stroke_preserve()
         cr2.fill()
         cr2.restore()
@@ -639,7 +680,7 @@ class Overlay:
         PangoCairo.show_layout(cr2, layout)
         out = (surface, w, h)
         self.word_cache[key] = out
-        while len(self.word_cache) > 96:
+        while len(self.word_cache) > 128:
             self.word_cache.pop(next(iter(self.word_cache)))
         return out
 
@@ -665,69 +706,162 @@ class Overlay:
         eased = 1 - (1 - p) ** 3
         return 0.35 + 0.65 * eased, 0.9 + 0.1 * eased
 
-    def _draw_stack(self, cr, width, height, view: View) -> None:
+    # rolling column (stack and visual styles) --------------------------------
+
+    @staticmethod
+    def _word_style(line_key: str, index: int) -> str:
+        return ("bold", "serif", "medium")[hash((line_key, index)) % 3]
+
+    def _stagger(self, line_key: str, index: int, width: int) -> float:
+        return (hash((line_key, "x", index)) % 1000 / 1000 - 0.5) * width * 0.16
+
+    def _column_rows(self, view: View, ix: int) -> list[tuple[int, str]]:
+        texts = [t for t, _ in view.words]
+        lo = max(0, ix - (COLUMN_ROWS - 1))
+        return [(i, texts[i]) for i in range(lo, ix + 1)]
+
+    def _draw_column_word(self, cr, width, slot_y, line_key, i, text, role, now, extra_alpha=1.0):
+        size = int(self.size * (2.0, 1.44, 1.1)[role])
+        alpha = (1.0, 0.62, 0.38)[role] * extra_alpha
+        dim = role != 0
+        rgb = self.accent_rgb if role == 0 else (1, 1, 1)
+        surface, w, h = self._word_surface(text, size, rgb, dim, self._word_style(line_key, i))
+        cx = width / 2 + self._stagger(line_key, i, width)
+        if role == 0 and self.motion and (self.state or {}).get("status") == "playing":
+            cx += 2.5 * math.sin(now * 1.3 + i)
+        glyph = glyph_for(text) if self.style == "visual" else None
+        self._paint_word(cr, surface, w, h, cx, slot_y, alpha)
+        if glyph and role == 0:
+            gs, gw, gh = self._word_surface(glyph, max(14, size // 2), self.accent_rgb, True)
+            self._paint_word(cr, gs, gw, gh, cx - w / 2 - gw / 2 - 6, slot_y, 0.9 * extra_alpha)
+        return h
+
+    def _draw_rolling(self, cr, width, height, view: View) -> None:
         now = time.monotonic()
         ix = current_word_index(view)
-        texts = [t for t, _ in view.words]
-        cy = height * 0.46
-        if 0 <= ix < len(texts):
-            surface, w, h = self._word_surface(
-                texts[ix], int(self.size * STACK_SCALE), self.accent_rgb, False
-            )
-            alpha, zoom = self._pop(now)
-            if self.motion and (self.state or {}).get("status") == "playing":
-                zoom *= 1.0 + 0.012 * math.sin(now * 2.1)
-            self._paint_word(cr, surface, w, h, width / 2, cy, alpha, zoom)
-            top, bottom = cy - h / 2, cy + h / 2
-        else:
-            top = bottom = cy
-        small = max(13, int(self.size * 0.85))
-        if ix > 0:
-            surface, w, h = self._word_surface(texts[ix - 1], small, (1, 1, 1), True, italic=True)
-            self._paint_word(cr, surface, w, h, width / 2, top - 18 - h / 2, 0.8)
-        if 0 <= ix + 1 < len(texts):
-            surface, w, h = self._word_surface(texts[ix + 1], small, (1, 1, 1), True, italic=True)
-            self._paint_word(cr, surface, w, h, width / 2, bottom + 18 + h / 2, 0.8)
+        if ix < 0:
+            return
+        rows = self._column_rows(view, ix)
+        slide = 1.0
+        if now - self.slide_from < SLIDE_SECONDS:
+            p = (now - self.slide_from) / SLIDE_SECONDS
+            slide = 1 - (1 - p) ** 3
+        row_h = self.size * 2.1
+        base = height * 0.5 + (1 - slide) * row_h
+        exiting = None
+        if slide < 1.0 and ix - COLUMN_ROWS >= 0:
+            exiting = (ix - COLUMN_ROWS, [t for t, _ in view.words][ix - COLUMN_ROWS])
+        # ghost trails while the column slides
+        offsets = [(0.0, 1.0)]
+        if slide < 1.0 and self.motion:
+            offsets = [
+                (row_h * (1 - slide) * 0.66, 0.10),
+                (row_h * (1 - slide) * 0.33, 0.22),
+                (0.0, 1.0),
+            ]
+        for ghost_dy, ghost_alpha in offsets:
+            if exiting is not None:
+                i, text = exiting
+                y = base - len(rows) * row_h
+                self._draw_column_word(
+                    cr,
+                    width,
+                    y + ghost_dy,
+                    view.line_key,
+                    i,
+                    text,
+                    2,
+                    now,
+                    (1 - slide) * ghost_alpha,
+                )
+            for pos, (i, text) in enumerate(rows):
+                role = len(rows) - 1 - pos
+                y = base - role * row_h
+                alpha = ghost_alpha if role == 0 or slide < 1.0 else 1.0
+                self._draw_column_word(
+                    cr, width, y + ghost_dy, view.line_key, i, text, min(role, 2), now, alpha
+                )
 
-    def _positions(self, view: View, width, height):
-        key = (view.line_key, width, height)
+    # constellation ------------------------------------------------------------
+
+    def _positions(self, line_key: str, words: list[str], width, height):
+        key = (line_key, width, height)
         hit = self.places.get(key)
         if hit is None:
-            hit = place_words([t for t, _ in view.words], width, height, seed=view.line_key)
+            hit = chain_words(words, width, height, seed=line_key)
             self.places[key] = hit
             while len(self.places) > 8:
                 self.places.pop(next(iter(self.places)))
         return hit
 
-    def _draw_constellation(self, cr, width, height, view: View) -> None:
-        now = time.monotonic()
-        ix = current_word_index(view)
-        if ix < 0:
-            return
-        texts = [t for t, _ in view.words]
-        positions = self._positions(view, width, height)
+    def _draw_cluster(self, cr, width, height, line_key, texts, ix, now, fade=1.0):
+        positions = self._positions(line_key, texts, width, height)
         cr.set_line_width(1.0)
-        cr.set_source_rgba(1, 1, 1, 0.14)
+        cr.set_source_rgba(1, 1, 1, 0.14 * fade)
         for i in range(min(ix, len(positions) - 1)):
             cr.move_to(*positions[i])
             cr.line_to(*positions[i + 1])
             cr.stroke()
-        spark, sw, sh = self._word_surface("✦", max(11, self.size // 2), (1, 1, 1), True)
-        for sx, sy in sparkles(view.line_key, width, height, SPARKS):
-            self._paint_word(cr, spark, sw, sh, sx, sy, 0.5)
-        past = max(13, int(self.size * PAST_SCALE))
+        spark, sw, sh = self._word_surface("✦", max(10, self.size // 2 - 4), (1, 1, 1), True)
+        past = max(12, int(self.size * PAST_SCALE))
         for i in range(ix):
             dx, dy = self._drift(now, i)
+            x, y = positions[i][0] + dx, positions[i][1] + dy
+            self._paint_word(cr, spark, sw, sh, x, y - self.size * 0.7, 0.45 * fade)
             surface, w, h = self._word_surface(texts[i], past, (1, 1, 1), True)
-            self._paint_word(cr, surface, w, h, positions[i][0] + dx, positions[i][1] + dy, 0.85)
-        surface, w, h = self._word_surface(
-            texts[ix], int(self.size * CONSTELLATION_SCALE), self.accent_rgb, False
+            self._paint_word(cr, surface, w, h, x, y, 0.8 * fade)
+        if 0 <= ix < len(positions):
+            surface, w, h = self._word_surface(
+                texts[ix], int(self.size * CONSTELLATION_SCALE), self.accent_rgb, False
+            )
+            alpha, zoom = self._pop(now)
+            dx, dy = self._drift(now, ix, 1.6)
+            self._paint_word(
+                cr, surface, w, h, positions[ix][0] + dx, positions[ix][1] + dy, alpha * fade, zoom
+            )
+
+    def _draw_constellation(self, cr, width, height, view: View) -> None:
+        now = time.monotonic()
+        if self.exit_snapshot is not None:
+            age = now - self.exit_from
+            if age < EXIT_SECONDS:
+                line_key, texts, ix = self.exit_snapshot
+                self._draw_cluster(
+                    cr, width, height, line_key, texts, ix, now, 1 - age / EXIT_SECONDS
+                )
+            else:
+                self.exit_snapshot = None
+        ix = current_word_index(view)
+        if ix < 0:
+            return
+        self._draw_cluster(cr, width, height, view.line_key, [t for t, _ in view.words], ix, now)
+
+    # visual background, credit, card ------------------------------------------
+
+    def _visual_background(self, cr, width, height) -> None:
+        art = ((self.state or {}).get("track") or {}).get("art") or ""
+        if not art:
+            return
+        surface, _w, _h = self._cover_surface(art)
+        if surface is None:
+            return
+        iw, ih = surface.get_width(), surface.get_height()
+        zoom = max(width / max(1, iw), height / max(1, ih))
+        cr.save()
+        cr.translate((width - iw * zoom) / 2, (height - ih * zoom) / 2)
+        cr.scale(zoom, zoom)
+        cr.set_source_surface(surface, 0, 0)
+        cr.paint()
+        cr.restore()
+        cr.set_source_rgba(0, 0, 0, 0.38)
+        cr.paint()
+        vignette = cairo.RadialGradient(
+            width / 2, height / 2, height * 0.35, width / 2, height / 2, height * 0.85
         )
-        alpha, zoom = self._pop(now)
-        dx, dy = self._drift(now, ix, 1.6)
-        self._paint_word(
-            cr, surface, w, h, positions[ix][0] + dx, positions[ix][1] + dy, alpha, zoom
-        )
+        vignette.add_color_stop_rgba(0, 0, 0, 0, 0)
+        vignette.add_color_stop_rgba(1, 0, 0, 0, 0.45)
+        cr.set_source(vignette)
+        cr.paint()
 
     def _draw_credit(self, cr, width, height) -> None:
         credit = self._credit_text()
@@ -768,52 +902,90 @@ class Overlay:
         self.word_cache[("cover", path)] = out
         return out
 
+    @staticmethod
+    def _rounded(cr, x, y, w, h, radius) -> None:
+        cr.new_sub_path()
+        cr.arc(x + w - radius, y + radius, radius, -math.pi / 2, 0)
+        cr.arc(x + w - radius, y + h - radius, radius, 0, math.pi / 2)
+        cr.arc(x + radius, y + h - radius, radius, math.pi / 2, math.pi)
+        cr.arc(x + radius, y + radius, radius, math.pi, 3 * math.pi / 2)
+        cr.close_path()
+
     def _draw_card(self, cr, width, height) -> None:
-        track = (self.state or {}).get("track") or {}
+        state = self.state or {}
+        track = state.get("track") or {}
         art = track.get("art") or ""
-        size = 280.0
-        cx, cy = width / 2, height * 0.44
+        size = max(240.0, height * 0.30)
+        cx, cy = width / 2, height * 0.42
+        x, y = cx - size / 2, cy - size / 2
+        # deep soft shadow
+        for grow, alpha in ((26, 0.05), (16, 0.09), (8, 0.14), (3, 0.18)):
+            cr.set_source_rgba(0, 0, 0, alpha)
+            self._rounded(
+                cr, x - grow / 2, y - grow / 2 + 6, size + grow, size + grow, 26 + grow / 2
+            )
+            cr.fill()
         surface, _w, _h = self._cover_surface(art) if art else (None, 0, 0)
         if surface is not None:
             iw, ih = surface.get_width(), surface.get_height()
             cr.save()
-            x, y = cx - size / 2, cy - size / 2
-            radius = 22
-            cr.new_sub_path()
-            cr.arc(x + size - radius, y + radius, radius, -math.pi / 2, 0)
-            cr.arc(x + size - radius, y + size - radius, radius, 0, math.pi / 2)
-            cr.arc(x + radius, y + size - radius, radius, math.pi / 2, math.pi)
-            cr.arc(x + radius, y + radius, radius, math.pi, 3 * math.pi / 2)
-            cr.close_path()
+            self._rounded(cr, x, y, size, size, 24)
             cr.clip()
             cr.translate(x, y)
             cr.scale(size / max(1, iw), size / max(1, ih))
             cr.set_source_surface(surface, 0, 0)
             cr.paint()
             cr.restore()
+        else:
+            cr.set_source_rgba(1, 1, 1, 0.08)
+            self._rounded(cr, x, y, size, size, 24)
+            cr.fill()
+        y2 = cy + size / 2 + 26
         title = track.get("title") or ""
         artist = track.get("artist") or ""
-        y = cy + size / 2 + 18
         if title:
             ts, tw, th = self._word_surface(
-                title[:60], max(20, int(self.size * 0.85)), (1, 1, 1), False
+                title[:48], max(21, int(self.size * 0.95)), (1, 1, 1), False
             )
-            self._paint_word(cr, ts, tw, th, cx, y + th / 2)
-            y += th + 2
+            self._paint_word(cr, ts, tw, th, cx, y2 + th / 2)
+            y2 += th + 4
         if artist:
             asf, aw, ah = self._word_surface(
-                artist[:60], max(14, int(self.size * 0.55)), (1, 1, 1), True
+                artist[:48], max(14, int(self.size * 0.58)), (1, 1, 1), True
             )
-            self._paint_word(cr, asf, aw, ah, cx, y + ah / 2, 0.85)
+            self._paint_word(cr, asf, aw, ah, cx, y2 + ah / 2, 0.8)
+            y2 += ah + 18
+        # decorative pill controls (the overlay itself stays click-through)
+        paused = state.get("status") == "paused"
+        glyphs = ["󰒮", "󰐊" if paused else "󰏤", "󰒭"]
+        radius = 21.0
+        gap = 64.0
+        for i, glyph in enumerate(glyphs):
+            gx = cx + (i - 1) * gap
+            cr.set_source_rgba(1, 1, 1, 0.10)
+            cr.arc(gx, y2 + radius, radius, 0, 2 * math.pi)
+            cr.fill()
+            gs, gw, gh = self._word_surface(glyph, 19, (1, 1, 1), False)
+            self._paint_word(cr, gs, gw, gh, gx, y2 + radius, 0.92)
+        y2 += 2 * radius + 16
+        ls, lw, lh = self._word_surface("󰍥  Lyrics", 15, (1, 1, 1), True)
+        cr.set_source_rgba(1, 1, 1, 0.08)
+        self._rounded(cr, cx - lw / 2 - 14, y2, lw + 28, lh + 10, (lh + 10) / 2)
+        cr.fill()
+        self._paint_word(cr, ls, lw, lh, cx, y2 + (lh + 10) / 2, 0.9)
 
     def on_draw(self, _area, cr, width, height, *_):
         view = self.view
         if not view.visible:
             if self._card_active():
+                if self.style == "visual":
+                    self._visual_background(cr, width, height)
                 self._draw_card(cr, width, height)
             return
-        if self.style == "stack":
-            self._draw_stack(cr, width, height, view)
+        if self.style == "visual":
+            self._visual_background(cr, width, height)
+        if self.style in ("stack", "visual"):
+            self._draw_rolling(cr, width, height, view)
             self._draw_credit(cr, width, height)
             return
         if self.style == "constellation":

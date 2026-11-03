@@ -1,3 +1,4 @@
+import itertools
 import math
 
 from encorelib.constellation import place_words, sparkles
@@ -48,3 +49,25 @@ def test_sparkles_deterministic_and_bounded():
     assert a == sparkles("k1", 1920, 1080, k=7)
     assert len(a) == 7
     assert all(0 <= x <= 1920 and 0 <= y <= 1080 for x, y in a)
+
+
+def test_chain_words_deterministic_and_stepped():
+    from encorelib.constellation import chain_words
+
+    a = chain_words(WORDS, 1920, 1080, seed="k1")
+    assert a == chain_words(WORDS, 1920, 1080, seed="k1")
+    assert a != chain_words(WORDS, 1920, 1080, seed="k2")
+    assert len(a) == len(WORDS)
+    import math
+
+    steps = [math.hypot(b[0] - c[0], b[1] - c[1]) for b, c in itertools.pairwise(a)]
+    assert all(70 <= s <= 240 for s in steps)  # near the previous word, never on it
+
+
+def test_chain_words_stay_in_center_band():
+    from encorelib.constellation import chain_words
+
+    pos = chain_words(WORDS * 3, 1920, 1080, seed="k1")
+    for x, y in pos:
+        assert 1920 * 0.12 <= x <= 1920 * 0.88
+        assert 1080 * 0.2 <= y <= 1080 * 0.8
