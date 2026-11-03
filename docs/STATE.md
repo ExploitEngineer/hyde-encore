@@ -20,6 +20,12 @@
 - Lyrics overlay: GTK4 layer-shell, click-through, per-word feathered fill in the album accent, baked glow and shadow, dimmed next line, Spicy credit (first 10 s per track and while paused), slide-up cross-fade within a track, flock single-instance, `hyde-shell encore toggle`.
 - Measured: animating ~6% of one core at a 30 fps sweep, paused and hidden 0%; 171 tests.
 
+## Shipped (polish, 2026-11-04, branch feat/encore-polish)
+- Glow v2: covers the true screen edge including waybar and corners (exclusive zone -1), two-accent gradient flowing along the edges, faster on the beat.
+- Text motion: constellation drift and stack breathe while playing, `motion` look key and menu row (default on).
+- Menu: Motion row and Player picker row (hand encore any MPRIS player).
+- Post-ship review of this branch still owed (owner deadline shipped it review-light).
+
 ## Shipped (Plan 3, 2026-11-04, branch feat/encore-showcase)
 - Overlay styles `stack` and `constellation` (live switch via `hyde-shell encore style`), matching the Verci reel looks; word-boundary scheduling, paused/hidden cost 0.
 - `hyde-shell encore glow`: four-edge accent glow, cava beat envelope with breathe fallback, ~6% of one core playing, repaint-skip when imperceptible.

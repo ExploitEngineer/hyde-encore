@@ -8,6 +8,7 @@ shows a faint static glow; stopped hides entirely.
 
 from __future__ import annotations
 
+import colorsys
 import logging
 import math
 import os
@@ -36,6 +37,11 @@ EDGES = (
     ("left", LayerShell.Edge.LEFT, (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM)),
     ("right", LayerShell.Edge.RIGHT, (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM)),
 )
+
+
+def _shift_hue(rgb: tuple[float, float, float], amount: float) -> tuple[float, float, float]:
+    h, lightness, sat = colorsys.rgb_to_hls(*rgb)
+    return colorsys.hls_to_rgb((h + amount) % 1.0, lightness, sat)
 
 
 def _hex_rgb(color: str) -> tuple[float, float, float]:
@@ -108,7 +114,10 @@ class Glow:
     def __init__(self, app: Gtk.Application, cfg: EncoreConfig, runtime_dir: str):
         self.cfg = cfg
         self.accent = (1.0, 1.0, 1.0)
+        self.accent2 = (1.0, 1.0, 1.0)
         self.status = "stopped"
+        self.phase = 0.0
+        self.last_tick = time.monotonic()
         self.envelope = 0.0
         self.cava_max = 8.0
         self.timer = 0
@@ -129,6 +138,8 @@ class Glow:
             LayerShell.set_anchor(window, edge, True)
             for side in sides:
                 LayerShell.set_anchor(window, side, True)
+            # cover the true screen edge, waybar and corners included
+            LayerShell.set_exclusive_zone(window, -1)
             if name in ("top", "bottom"):
                 window.set_default_size(-1, THICKNESS)
             else:
@@ -189,6 +200,8 @@ class Glow:
             self.status = state.get("status") or "stopped"
             palette = state.get("palette") or {}
             self.accent = _hex_rgb(pick_accent(palette))
+            second = palette.get("3xa8") or palette.get("2xa8") or ""
+            self.accent2 = _hex_rgb(second) if second else _shift_hue(self.accent, 0.12)
         self._schedule()
 
     def _on_cava_line(self, line: bytes) -> None:
@@ -224,13 +237,15 @@ class Glow:
         return 0.18
 
     def _tick(self) -> bool:
+        now = time.monotonic()
+        dt, self.last_tick = now - self.last_tick, now
         if self.cava_feed.connection is None:
-            self.envelope = 0.5 + 0.5 * math.sin(time.monotonic() * 1.6)
+            self.envelope = 0.5 + 0.5 * math.sin(now * 1.6)
         else:
             self.envelope *= RELEASE
-        # repaint four strips only when the eye could tell the difference
-        if abs(self._alpha() - self.drawn_alpha) >= 0.012:
-            self._queue()
+        # the gradient flows along the edges, faster on the beat
+        self.phase = (self.phase + dt * (0.05 + 0.22 * self.envelope)) % 1.0
+        self._queue()
         return True
 
     def _queue(self) -> None:
@@ -240,20 +255,31 @@ class Glow:
     def _draw(self, _area, cr, width, height, name) -> None:
         alpha = self._alpha()
         self.drawn_alpha = alpha
-        r, g, b = self.accent
-        if name == "top":
-            gradient = cairo.LinearGradient(0, 0, 0, height)
-        elif name == "bottom":
-            gradient = cairo.LinearGradient(0, height, 0, 0)
-        elif name == "left":
-            gradient = cairo.LinearGradient(0, 0, width, 0)
+        # color flowing along the edge between the two album accents
+        if name in ("top", "bottom"):
+            along = cairo.LinearGradient(0, 0, width, 0)
         else:
-            gradient = cairo.LinearGradient(width, 0, 0, 0)
-        gradient.add_color_stop_rgba(0.0, r, g, b, alpha)
-        gradient.add_color_stop_rgba(0.55, r, g, b, alpha * 0.25)
-        gradient.add_color_stop_rgba(1.0, r, g, b, 0.0)
-        cr.set_source(gradient)
-        cr.paint()
+            along = cairo.LinearGradient(0, 0, 0, height)
+        for i in range(7):
+            t = i / 6
+            mix = 0.5 + 0.5 * math.sin(2 * math.pi * (t * 1.5 - self.phase))
+            r = self.accent[0] * mix + self.accent2[0] * (1 - mix)
+            g = self.accent[1] * mix + self.accent2[1] * (1 - mix)
+            b = self.accent[2] * mix + self.accent2[2] * (1 - mix)
+            along.add_color_stop_rgba(t, r, g, b, 1.0)
+        if name == "top":
+            fade = cairo.LinearGradient(0, 0, 0, height)
+        elif name == "bottom":
+            fade = cairo.LinearGradient(0, height, 0, 0)
+        elif name == "left":
+            fade = cairo.LinearGradient(0, 0, width, 0)
+        else:
+            fade = cairo.LinearGradient(width, 0, 0, 0)
+        fade.add_color_stop_rgba(0.0, 1, 1, 1, alpha)
+        fade.add_color_stop_rgba(0.55, 1, 1, 1, alpha * 0.25)
+        fade.add_color_stop_rgba(1.0, 1, 1, 1, 0.0)
+        cr.set_source(along)
+        cr.mask(fade)
 
     def shutdown(self) -> None:
         self.cancel.cancel()

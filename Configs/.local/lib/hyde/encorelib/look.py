@@ -31,7 +31,7 @@ def _valid(key: str, value) -> bool:
         )
     if key == "color":
         return isinstance(value, str) and bool(_COLOR.match(value))
-    if key == "next_line":
+    if key in ("next_line", "motion"):
         return isinstance(value, bool)
     return False
 
@@ -67,12 +67,13 @@ def update_look(path: Path, **changes) -> dict:
     return look
 
 
-def effective(cfg: EncoreConfig, look: dict) -> tuple[str, str, int, str, bool]:
-    """(style, font, size, color, next_line) after overrides."""
+def effective(cfg: EncoreConfig, look: dict) -> tuple[str, str, int, str, bool, bool]:
+    """(style, font, size, color, next_line, motion) after overrides."""
     return (
         look.get("style", cfg.overlay_style),
         look.get("font", cfg.overlay_font),
         look.get("size", cfg.overlay_size),
         look.get("color", cfg.overlay_color),
         look.get("next_line", cfg.overlay_next_line),
+        look.get("motion", True),
     )

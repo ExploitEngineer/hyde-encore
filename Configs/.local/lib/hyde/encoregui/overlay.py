@@ -182,9 +182,14 @@ class Overlay:
         self.small: dict[tuple, LineRaster] = {}
         self.word_cache: dict[tuple, tuple[cairo.ImageSurface, float, float]] = {}
         self.look_path = os.path.join(runtime_dir, "encore.look")
-        self.style, self.font, self.size, self.color_override, self.show_next = effective(
-            cfg, read_look(self.look_path)
-        )
+        (
+            self.style,
+            self.font,
+            self.size,
+            self.color_override,
+            self.show_next,
+            self.motion,
+        ) = effective(cfg, read_look(self.look_path))
         self.fade_from = 0.0
         self.last_word_ix: int | None = None
         self._last_fade_key = ""
@@ -297,12 +302,19 @@ class Overlay:
 
     def _reload_look(self) -> None:
         new = effective(self.cfg, read_look(self.look_path))
-        old = (self.style, self.font, self.size, self.color_override, self.show_next)
+        old = (self.style, self.font, self.size, self.color_override, self.show_next, self.motion)
         if new == old:
             return
         style_changed = new[0] != self.style
         size_changed = new[2] != self.size
-        self.style, self.font, self.size, self.color_override, self.show_next = new
+        (
+            self.style,
+            self.font,
+            self.size,
+            self.color_override,
+            self.show_next,
+            self.motion,
+        ) = new
         for cache in (self.rasters, self.small, self.word_cache, self.places):
             cache.clear()
         self._accent_palette = None  # force accent recompute (color override)
@@ -425,7 +437,9 @@ class Overlay:
                 self._last_fade_key = view.line_key
                 if ix is not None and ix >= 0:
                     self.fade_from = now
-            active = view.visible and (now - self.fade_from) < POP_SECONDS
+            playing = (self.state or {}).get("status") == "playing"
+            drifting = self.motion and view.visible and playing
+            active = view.visible and ((now - self.fade_from) < POP_SECONDS or drifting)
             wake = next_word_boundary(self.state, now) if view.visible else None
             if wake is None:
                 wake = view.wake_in
@@ -473,7 +487,10 @@ class Overlay:
                 self._last_fade_key = view.line_key
                 if ix is not None and ix >= 0:
                     self.fade_from = now
-            still = (now - self.fade_from) < POP_SECONDS
+            playing = (self.state or {}).get("status") == "playing"
+            still = (now - self.fade_from) < POP_SECONDS or (
+                self.motion and view.visible and playing
+            )
         if changed_key or not view.visible or not still:
             self.anim_id = 0
             GLib.idle_add(self.apply)
@@ -634,6 +651,15 @@ class Overlay:
         cr.paint_with_alpha(alpha)
         cr.restore()
 
+    def _drift(self, now: float, index: int, boost: float = 1.0) -> tuple[float, float]:
+        """A slow float so the constellation feels alive; still while paused."""
+        if not self.motion or (self.state or {}).get("status") != "playing":
+            return (0.0, 0.0)
+        return (
+            4.0 * boost * math.sin(now * 0.7 + index * 1.7),
+            3.0 * boost * math.sin(now * 0.9 + index * 2.3 + 1.1),
+        )
+
     def _pop(self, now: float) -> tuple[float, float]:
         p = min(1.0, max(0.0, (now - self.fade_from) / POP_SECONDS))
         eased = 1 - (1 - p) ** 3
@@ -649,6 +675,8 @@ class Overlay:
                 texts[ix], int(self.size * STACK_SCALE), self.accent_rgb, False
             )
             alpha, zoom = self._pop(now)
+            if self.motion and (self.state or {}).get("status") == "playing":
+                zoom *= 1.0 + 0.012 * math.sin(now * 2.1)
             self._paint_word(cr, surface, w, h, width / 2, cy, alpha, zoom)
             top, bottom = cy - h / 2, cy + h / 2
         else:
@@ -689,13 +717,17 @@ class Overlay:
             self._paint_word(cr, spark, sw, sh, sx, sy, 0.5)
         past = max(13, int(self.size * PAST_SCALE))
         for i in range(ix):
+            dx, dy = self._drift(now, i)
             surface, w, h = self._word_surface(texts[i], past, (1, 1, 1), True)
-            self._paint_word(cr, surface, w, h, *positions[i], 0.85)
+            self._paint_word(cr, surface, w, h, positions[i][0] + dx, positions[i][1] + dy, 0.85)
         surface, w, h = self._word_surface(
             texts[ix], int(self.size * CONSTELLATION_SCALE), self.accent_rgb, False
         )
         alpha, zoom = self._pop(now)
-        self._paint_word(cr, surface, w, h, *positions[ix], alpha, zoom)
+        dx, dy = self._drift(now, ix, 1.6)
+        self._paint_word(
+            cr, surface, w, h, positions[ix][0] + dx, positions[ix][1] + dy, alpha, zoom
+        )
 
     def _draw_credit(self, cr, width, height) -> None:
         credit = self._credit_text()
