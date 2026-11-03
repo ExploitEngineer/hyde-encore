@@ -81,9 +81,11 @@ def _as_bool(value: str | None, default: bool) -> bool:
 
 
 def _as_int(value: str | None, default: int) -> int:
+    if value is None:
+        return default
     try:
         return int(_unquote(value))
-    except (TypeError, ValueError):
+    except ValueError:
         return default
 
 
