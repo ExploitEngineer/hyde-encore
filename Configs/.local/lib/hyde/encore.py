@@ -20,6 +20,7 @@ import logging
 import os
 import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -63,6 +64,7 @@ RUNTIME_DIR = (xdg_runtime_dir() or Path(f"/run/user/{os.getuid()}")) / "hyde"
 SOCKET_PATH = RUNTIME_DIR / "encore.sock"
 HYPRLOCK_PATH = RUNTIME_DIR / "encore.hyprlock"
 TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
+OVERLAY_PIDFILE = RUNTIME_DIR / "encore-overlay.pid"
 COVER_PATH = RUNTIME_DIR / "encore.cover.png"  # album art for hyprlock
 RUNTIME_FILES = (HYPRLOCK_PATH, TRACK_PATH, COVER_PATH)
 CACHE_DIR = xdg_cache_home() / "hyde" / "encore"
@@ -330,6 +332,45 @@ class Encore:
         )
 
 
+def spawn_overlay() -> None:
+    """Start the overlay as its own detached process via encore.sh (LD_PRELOAD)."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encore.sh")
+    subprocess.Popen(
+        ["bash", script, "overlay"],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def run_overlay_cmd() -> int:
+    os.environ.setdefault("GSK_RENDERER", "cairo")
+    from encorelib import single
+
+    if not single.claim(OVERLAY_PIDFILE):
+        print("encore overlay is already running", file=sys.stderr)
+        return 0
+    try:
+        from encoregui.overlay import run_overlay
+
+        return run_overlay(load_config(), str(RUNTIME_DIR))
+    finally:
+        single.release(OVERLAY_PIDFILE)
+
+
+def run_toggle() -> int:
+    from encorelib import single
+
+    pid = single.read_pid(OVERLAY_PIDFILE)
+    if pid is not None and single.pid_alive(pid):
+        os.kill(pid, signal.SIGTERM)
+        print("encore overlay hidden")
+        return 0
+    spawn_overlay()
+    print("encore overlay shown")
+    return 0
+
+
 def run_daemon(if_enabled: bool) -> int:
     from gi.repository import GLib
 
@@ -362,6 +403,8 @@ def run_daemon(if_enabled: bool) -> int:
 
     try:
         Encore(cfg, server)
+        if cfg.overlay_enable:
+            spawn_overlay()
         loop.run()
     finally:
         server.close()
@@ -377,12 +420,18 @@ def main(argv: list[str] | None = None) -> int:
     daemon.add_argument(
         "--if-enabled", action="store_true", help="exit unless [encore] enable = true"
     )
+    sub.add_parser("overlay", help="run the lyrics overlay (started via encore.sh)")
+    sub.add_parser("toggle", help="show or hide the lyrics overlay")
     sub.add_parser("status", help="print the current state as JSON")
     sub.add_parser("hyprlock", help="print the current lyric line as Pango markup")
     args = parser.parse_args(argv)
 
     if args.command == "daemon":
         return run_daemon(args.if_enabled)
+    if args.command == "overlay":
+        return run_overlay_cmd()
+    if args.command == "toggle":
+        return run_toggle()
     if args.command == "status":
         print(json.dumps(read_state(SOCKET_PATH) or {"status": "stopped"}, ensure_ascii=False))
         return 0
