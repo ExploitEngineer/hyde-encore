@@ -36,3 +36,9 @@ def test_should_connect_on_socket_only():
     assert should_connect("/run/user/1000/hyde/encore.sock") is True
     assert should_connect("/run/user/1000/hyde/encore.hyprlock") is False
     assert should_connect("/run/user/1000/hyde/cava.sock") is False
+
+
+def test_styles_include_visual():
+    from encorelib.stream import STYLES
+
+    assert "visual" in STYLES
