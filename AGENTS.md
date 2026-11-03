@@ -19,3 +19,11 @@ Goal is an upstream PR to HyDE-Project/HyDE, so everything must look like HyDE w
 - Tests: `python3 -m pytest -q`
 - Lint: `uvx ruff check Configs tests` and `uvx ruff format --check Configs tests`
 - Python runs on system `python3` (DECISIONS #8); `encorelib/` must not import `gi`.
+- E2E: `python3 tests/e2e/fake_mpris.py --art <cover> &` then drive with `playerctl -p encoretest play|pause|next|position N` and read `hyde-shell encore status`.
+- Never `pkill -f`/`pgrep -f` with a pattern that also appears in the same shell command; it matches and kills that shell. Anchor patterns (`^python3 ...$`) or run from a script file.
+
+## Architecture
+- `Configs/.local/lib/hyde/encorelib/`: pure logic (model, lrc, timing, clock, config, providers, cache, palette, protocol, session). Unit-tested, no `gi`.
+- `Configs/.local/lib/hyde/encore.py`: GLib/Playerctl daemon and CLI; `encore.sh` is the hyde-shell entry.
+- State protocol: JSON lines on `$XDG_RUNTIME_DIR/hyde/encore.sock`, schema in `docs/superpowers/plans/2026-11-03-encore-core.md`. Plans 2-3 consume it.
+- Upstream fragments: `Configs/.local/share/hyde/schema/*.toml` and `Configs/.local/share/hypr/lua/variables.encore.lua` hold only encore's additions, to merge into HyDE's files.

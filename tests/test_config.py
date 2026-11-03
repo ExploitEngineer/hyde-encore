@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from conftest import FIXTURES
+
 from encorelib.config import EncoreConfig, load_config
 
 HOME = {"HOME": "/home/u"}
@@ -62,9 +64,25 @@ def test_players_shell_array_from_hyde(tmp_path):
     assert cfg.players == ("spotify", "firefox")
 
 
-def test_lyrics_dirs_colon_list(tmp_path):
+def test_lyrics_dirs_are_added_before_defaults(tmp_path):
     cfg = load_config(env={**HOME, "ENCORE_LYRICS_DIRS": "/a:/b"}, env_file=tmp_path / "x")
-    assert cfg.lyrics_dirs == (Path("/a"), Path("/b"))
+    assert cfg.lyrics_dirs == (
+        Path("/a"),
+        Path("/b"),
+        Path("/home/u/.local/share/lyrics"),
+        Path("/home/u/Music/Lyrics"),
+    )
+
+
+def test_real_hyde_config_lua_output():
+    """tests/fixtures/hyde_config.env was produced by HyDE's config.lua."""
+    cfg = load_config(env=HOME, env_file=FIXTURES / "hyde_config.env")
+    assert cfg.enable is True
+    assert cfg.players == ("spotify", "firefox")
+    assert cfg.spicy_key == "sl_sk_x"
+    assert cfg.lrclib is False
+    assert cfg.hyprlock_color == "#CAAAF0"
+    assert cfg.lyrics_dirs[:2] == (Path("/a b"), Path("/c"))
 
 
 def test_hyprlock_colors(tmp_path):

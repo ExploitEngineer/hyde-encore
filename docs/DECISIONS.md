@@ -29,3 +29,7 @@ HyDE's venv (`$XDG_STATE_HOME/hyde/python_env`) is built with `include-system-si
 System `python3` has `python-gobject`, `playerctl` and `gtk4-layer-shell` typelibs on Arch.
 `encore.sh` is the `hyde-shell` entry (hyde-shell prefers `.sh` over `.py`) and execs system `python3 encore.py`.
 `encorelib/` stays free of `gi` and third-party imports so it runs on either interpreter.
+
+## 9. 2026-11-03 - Autostart through HyDE's hc.start / [desktop.start] - Active
+encore starts like HyDE's other services: `hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-encore.service -t service -- encore.sh daemon --if-enabled`.
+The daemon exits at once unless `[encore] enable = true`, so the entry can ship enabled-by-config without starting anything by default.

@@ -78,6 +78,16 @@ def _default_lyrics_dirs(env: Mapping[str, str]) -> tuple[Path, ...]:
     return (data / "lyrics", home / "Music" / "Lyrics")
 
 
+def _lyrics_dirs(value: str | None, env: Mapping[str, str]) -> tuple[Path, ...]:
+    """Configured folders (shell array or colon list) first, then the defaults."""
+    value = (value or "").strip()
+    if value.startswith("("):
+        extra = _as_list(value)
+    else:
+        extra = tuple(p for p in _unquote(value).split(":") if p)
+    return tuple(Path(p) for p in extra) + _default_lyrics_dirs(env)
+
+
 def default_env_file(env: Mapping[str, str]) -> Path:
     home = Path(env.get("HOME", str(Path.home())))
     state = Path(env.get("XDG_STATE_HOME") or home / ".local" / "state")
@@ -96,11 +106,7 @@ def load_config(env: Mapping[str, str] | None = None, env_file: Path | None = No
     return EncoreConfig(
         enable=_as_bool(get("ENCORE_ENABLE"), False),
         players=_as_list(get("ENCORE_PLAYERS") or ""),
-        lyrics_dirs=(
-            tuple(Path(p) for p in _unquote(dirs).split(":") if p)
-            if dirs
-            else _default_lyrics_dirs(merged)
-        ),
+        lyrics_dirs=_lyrics_dirs(dirs, merged),
         spicy_key=_unquote(get("ENCORE_LYRICS_SPICY_KEY") or get("SPICY_LYRICS_SECRET_KEY") or ""),
         lrclib=_as_bool(get("ENCORE_LYRICS_LRCLIB"), True),
         hyprlock_color=_unquote(get("ENCORE_HYPRLOCK_COLOR") or ""),
