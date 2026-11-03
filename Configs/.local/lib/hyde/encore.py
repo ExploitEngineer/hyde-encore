@@ -67,6 +67,7 @@ TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
 OVERLAY_PIDFILE = RUNTIME_DIR / "encore-overlay.pid"
 LOOK_PATH = RUNTIME_DIR / "encore.look"
 GLOW_PIDFILE = RUNTIME_DIR / "encore-glow.pid"
+SETTINGS_PIDFILE = RUNTIME_DIR / "encore-settings.pid"
 COVER_PATH = RUNTIME_DIR / "encore.cover.png"  # album art for hyprlock
 RUNTIME_FILES = (HYPRLOCK_PATH, TRACK_PATH, COVER_PATH)
 CACHE_DIR = xdg_cache_home() / "hyde" / "encore"
@@ -374,7 +375,8 @@ def run_toggle() -> int:
 
 
 def run_glow_cmd() -> int:
-    os.environ.setdefault("GSK_RENDERER", "cairo")
+    # the glow is GPU-scaled textures: GTK's default GL renderer suits it
+    # (the overlay keeps cairo, where small text surfaces win)
     from encorelib import single
 
     if not single.claim(GLOW_PIDFILE):
@@ -405,6 +407,60 @@ def run_glow_toggle() -> int:
     )
     print("encore glow on")
     return 0
+
+
+def run_settings_cmd() -> int:
+    from encoregui.settings import run_settings
+
+    return run_settings(str(LOOK_PATH), str(SOCKET_PATH), str(SETTINGS_PIDFILE))
+
+
+def _ensure(pidfile: Path, command: list[str], want_on: bool) -> None:
+    from encorelib import single
+
+    pid = single.read_pid(pidfile)
+    running = pid is not None and single.pid_alive(pid)
+    if running != want_on:
+        subprocess.run(command, check=False, stdout=subprocess.DEVNULL)
+
+
+def run_profile(name: str) -> int:
+    from encorelib.profiles import PROFILES, apply_profile
+
+    glow = apply_profile(LOOK_PATH, name)
+    if glow is None:
+        print(f"unknown profile {name!r}; one of: {', '.join(PROFILES)}", file=sys.stderr)
+        return 1
+    me = [sys.executable, os.path.abspath(__file__)]
+    _ensure(GLOW_PIDFILE, [*me, "glow"], glow)
+    _ensure(OVERLAY_PIDFILE, [*me, "toggle"], True)
+    print(f"profile {name}")
+    return 0
+
+
+def run_show() -> int:
+    """Toggle the show workspace: an empty stage with the full show running."""
+    from encorelib.profiles import SHOW_WORKSPACE, show_action
+
+    try:
+        active = json.loads(
+            subprocess.run(
+                ["hyprctl", "activeworkspace", "-j"], capture_output=True, text=True, check=True
+            ).stdout
+        ).get("name", "")
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        active = ""
+    if show_action(active) == "enter":
+        subprocess.run(
+            ["hyprctl", "dispatch", "workspace", f"name:{SHOW_WORKSPACE}"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+        )
+        return run_profile("show")
+    subprocess.run(
+        ["hyprctl", "dispatch", "workspace", "previous"], check=False, stdout=subprocess.DEVNULL
+    )
+    return run_profile("working")
 
 
 def run_style(name: str) -> int:
@@ -627,7 +683,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     look.add_argument("key", help="font | size | color | next-line | motion | reset")
     look.add_argument("value", nargs="?", default="", help="new value ('auto' for color resets it)")
-    sub.add_parser("menu", help="open the encore control menu (rofi)")
+    menu = sub.add_parser("menu", help="open the encore settings window")
+    menu.add_argument("--rofi", action="store_true", help="use the compact rofi menu instead")
+    sub.add_parser("settings", help="open the encore settings window")
+    profile = sub.add_parser("profile", help="apply a sound setup: working or show")
+    profile.add_argument("name", help="working | show")
+    sub.add_parser("show", help="toggle the show workspace (full show on an empty stage)")
     sub.add_parser("status", help="print the current state as JSON")
     sub.add_parser("hyprlock", help="print the current lyric line as Pango markup")
     args = parser.parse_args(argv)
@@ -643,7 +704,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "look":
         return run_look(args.key, args.value)
     if args.command == "menu":
-        return run_menu()
+        return run_menu() if args.rofi else run_settings_cmd()
+    if args.command == "settings":
+        return run_settings_cmd()
+    if args.command == "profile":
+        return run_profile(args.name)
+    if args.command == "show":
+        return run_show()
     if args.command == "glow":
         return run_glow_cmd() if args.run else run_glow_toggle()
     if args.command == "status":

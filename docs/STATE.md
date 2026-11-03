@@ -20,6 +20,13 @@
 - Lyrics overlay: GTK4 layer-shell, click-through, per-word feathered fill in the album accent, baked glow and shadow, dimmed next line, Spicy credit (first 10 s per track and while paused), slide-up cross-fade within a track, flock single-instance, `hyde-shell encore toggle`.
 - Measured: animating ~6% of one core at a 30 fps sweep, paused and hidden 0%; 171 tests.
 
+## Shipped (setup, 2026-11-04, branch feat/encore-setup)
+- Settings window (GTK4, floats top-right via window rule): sound setup profiles, style list, installed fonts, size slider + reset, Auto Sync + album swatches, motion/next-line/glow/lyrics switches.
+- Profiles `working` (line, still, glow off) and `show` (visual, motion, glow on); `encore show` toggles the empty `encore` workspace with the show profile.
+- Glow v3: two comets circle the frame, faster on the beat; one full-screen GPU-scaled window, 2.5% of a core.
+- Echo-depth ghost trails (4 copies) on rolling-column slides, matching r4.
+- Owner binds: SUPER+ALT+{L,K,M,E}.
+
 ## Shipped (reel parity, 2026-11-04, branch feat/encore-parity, PR #6)
 - Frame-stepped audit of all 7 reels into `docs/superpowers/specs/2026-11-04-verci-parity.md`; reels kept locally in gitignored `.reference/`.
 - Stack/visual rolling column with ghost slides and per-word font mix; chain constellation with cluster fade; `visual` style (full-bleed art + glyphs); card v2 with pill controls.

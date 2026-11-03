@@ -48,3 +48,10 @@ Stack and constellation redraw on word boundaries plus 160 ms pops only.
 
 ## 13. 2026-11-04 - Edge glow is four layer strips in its own process - Active
 `hyde-shell encore glow` toggles it independently of lyrics; intensity rides a cava attack/release envelope when `cava.sock` exists, else a slow breathe; repaints skip when the intensity change is imperceptible.
+
+## 14. 2026-11-04 - Glow is one full-screen window with a GPU-scaled texture - Active (supersedes the four-strip layout in #13)
+Circling comets need continuous repaint; four strip windows at 20 fps cost 23% of a core (CPU raster) and still 9-12% after downscaling, because GTK's per-window frame overhead dominated.
+One click-through window composes all four edges into a 1/4-resolution frame texture that GSK stretches on the GPU: 2.5% of a core at 20 fps, compositor +1%.
+
+## 15. 2026-11-04 - Settings window and sound-setup profiles - Active
+A GTK4 panel (`hyde-shell encore menu`, SUPER+ALT+M) modelled on the reference app replaces the rofi menu (kept as `menu --rofi`); profiles `working` and `show` set look keys and the glow state; `encore show` (SUPER+ALT+E) toggles an empty `encore` workspace running the show profile.
