@@ -1,0 +1,1 @@
+{"id": 1, "trackName": "Test Song", "artistName": "Test Artist", "albumName": "Test Album", "duration": 215.0, "instrumental": false, "plainLyrics": "Hello world\nSecond line\nThird line\nFourth line", "syncedLyrics": "[00:12.50] Hello world\n[00:15.00] Second line\n[00:18.00] Third line\n[00:21.00] Fourth line\n"}

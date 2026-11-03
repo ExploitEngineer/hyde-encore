@@ -1,0 +1,22 @@
+[
+ {
+  "id": 2,
+  "trackName": "Test Song",
+  "artistName": "Test Artist",
+  "albumName": "Live",
+  "duration": 225.0,
+  "instrumental": false,
+  "plainLyrics": "wrong",
+  "syncedLyrics": "[00:01.00] wrong version\n[00:02.00] filler 2\n[00:03.00] filler 3\n[00:04.00] filler 4\n[00:05.00] filler 5"
+ },
+ {
+  "id": 3,
+  "trackName": "Test Song",
+  "artistName": "Test Artist",
+  "albumName": "Test Album",
+  "duration": 216.5,
+  "instrumental": false,
+  "plainLyrics": "right",
+  "syncedLyrics": "[00:01.00] right version\n[00:02.00] filler 2\n[00:03.00] filler 3\n[00:04.00] filler 4\n[00:05.00] filler 5"
+ }
+]
