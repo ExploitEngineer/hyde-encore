@@ -33,6 +33,7 @@ from encorelib.lyricview import (
     View,
     build_view,
     current_word_index,
+    live_position,
     next_word_boundary,
     should_transition,
 )
@@ -300,6 +301,7 @@ class Overlay:
         if new == old:
             return
         style_changed = new[0] != self.style
+        size_changed = new[2] != self.size
         self.style, self.font, self.size, self.color_override, self.show_next = new
         for cache in (self.rasters, self.small, self.word_cache, self.places):
             cache.clear()
@@ -310,6 +312,8 @@ class Overlay:
         self.fade_from = 0.0
         if style_changed:
             self._apply_style_geometry()
+        elif size_changed:
+            self._size_window()  # the line strip's height depends on the size
         self.apply()
 
     def try_connect(self) -> None:
@@ -713,7 +717,12 @@ class Overlay:
         if state.get("status") not in ("playing", "paused") or not state.get("track"):
             return False
         lyrics = state.get("lyrics")
-        return lyrics is None or lyrics.get("sync") == "none"
+        if lyrics is not None and lyrics.get("sync") != "none":
+            return False
+        if lyrics is None and state.get("status") == "playing":
+            # lyrics may still be on their way; don't flash the card at track start
+            return live_position(state, time.monotonic()) > 2.0
+        return True
 
     def _cover_surface(self, path: str):
         hit = self.word_cache.get(("cover", path))

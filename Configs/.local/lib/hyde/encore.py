@@ -456,14 +456,18 @@ def run_look(key: str, value: str) -> int:
     return 0
 
 
-def _rofi(entries: list[str], prompt: str) -> str:
-    result = subprocess.run(
-        ["rofi", "-dmenu", "-i", "-p", prompt],
-        input="\n".join(entries),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def _rofi(entries: list[str], prompt: str, index: bool = False) -> str:
+    """Run a rofi dmenu; with index=True the selected row NUMBER is returned."""
+    cmd = ["rofi", "-dmenu", "-i", "-p", prompt]
+    if index:
+        cmd += ["-format", "i"]
+    try:
+        result = subprocess.run(
+            cmd, input="\n".join(entries), capture_output=True, text=True, check=False
+        )
+    except FileNotFoundError:
+        print("encore menu needs rofi", file=sys.stderr)
+        return ""
     return result.stdout.strip()
 
 
@@ -480,31 +484,33 @@ def run_menu() -> int:
         now = f"{track.get('title', '')} - {track.get('artist', '')}".strip(" -")
         style = look.get("style") or load_config().overlay_style
         entries = [
-            f"󰐊  Play / Pause{('   (' + now + ')') if now else ''}",
-            "󰒭  Next track",
-            "󰒮  Previous track",
-            f"  Style: {style}",
-            f"  Font: {look.get('font', 'config')}",
-            f"  Size: {look.get('size', 'config')}",
-            f"  Color: {look.get('color', 'auto')}",
-            "  Lyrics on/off",
-            "  Glow on/off",
-            "  Reset look",
+            f"Play / Pause{('   (' + now + ')') if now else ''}",
+            "Next track",
+            "Previous track",
+            f"Style: {style}",
+            f"Font: {look.get('font', 'config')}",
+            f"Size: {look.get('size', 'config')}",
+            f"Color: {look.get('color', 'auto')}",
+            "Lyrics on/off",
+            "Glow on/off",
+            "Reset look",
         ]
-        choice = _rofi(entries, "encore")
-        if not choice:
+        picked = _rofi(entries, "encore", index=True)
+        try:
+            row = int(picked)
+        except ValueError:
             return 0
-        if choice.startswith("󰐊"):
+        if row == 0:
             subprocess.run(["playerctl", "play-pause"], check=False)
-        elif choice.startswith("󰒭"):
+        elif row == 1:
             subprocess.run(["playerctl", "next"], check=False)
-        elif choice.startswith("󰒮"):
+        elif row == 2:
             subprocess.run(["playerctl", "previous"], check=False)
-        elif choice.startswith(""):
+        elif row == 3:
             pick = _rofi(list(STYLES), "style")
             if pick:
                 run_style(pick)
-        elif choice.startswith(""):
+        elif row == 4:
             fonts = subprocess.run(
                 ["fc-list", ":", "family"], capture_output=True, text=True, check=False
             ).stdout
@@ -514,11 +520,11 @@ def run_menu() -> int:
             pick = _rofi(families, "font")
             if pick:
                 update_look(LOOK_PATH, font=pick)
-        elif choice.startswith(""):
+        elif row == 5:
             pick = _rofi([str(n) for n in range(18, 58, 4)], "size")
             if pick.isdigit():
                 update_look(LOOK_PATH, size=int(pick))
-        elif choice.startswith(""):
+        elif row == 6:
             palette = state.get("palette") or {}
             swatches = ["auto"] + [
                 f"#{palette[k]}  ({k})"
@@ -528,12 +534,14 @@ def run_menu() -> int:
             pick = _rofi(swatches, "color (hex or auto)")
             if pick:
                 update_look(LOOK_PATH, color=None if pick == "auto" else pick.split()[0])
-        elif choice.startswith(""):
+        elif row == 7:
             run_toggle()
-        elif choice.startswith(""):
+        elif row == 8:
             run_glow_toggle()
-        elif choice.startswith(""):
+        elif row == 9:
             update_look(LOOK_PATH, style=None, font=None, size=None, color=None, next_line=None)
+        else:
+            return 0
 
 
 def run_daemon(if_enabled: bool) -> int:

@@ -43,7 +43,7 @@ Animation runs on a 30 fps GLib timer because an active GTK tick callback forces
 A crash or toggle of the overlay never touches playback tracking.
 
 ## 12. 2026-11-04 - Overlay styles are one process with a live style file - Active
-`line`, `stack` and `constellation` share the overlay process, socket client and caches; `hyde-shell encore style` writes `$XDG_RUNTIME_DIR/hyde/encore.style`, which the existing runtime-dir monitor picks up.
+`line`, `stack` and `constellation` share the overlay process, socket client and caches; `hyde-shell encore style` writes `$XDG_RUNTIME_DIR/hyde/encore.look`, which the existing runtime-dir monitor picks up.
 Stack and constellation redraw on word boundaries plus 160 ms pops only.
 
 ## 13. 2026-11-04 - Edge glow is four layer strips in its own process - Active

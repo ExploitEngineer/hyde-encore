@@ -108,8 +108,13 @@ def next_word_boundary(state: dict | None, now: float) -> float | None:
     words = line.get("words") or []
     position = live_position(state, now)
     rate = state.get("rate", 1.0) or 1.0
-    # only word STARTS change what is on screen; ends inside a line do not
+    # only word STARTS change what is on screen; ends inside a line do not,
+    # except the LAST end, which starts the gap-hide countdown
     boundaries = [w["start"] for w in words if w["start"] > position]
-    if not boundaries:
-        return None
-    return (min(boundaries) - position) / rate
+    if boundaries:
+        return (min(boundaries) - position) / rate
+    if words:
+        hide_at = words[-1]["end"] + GAP_HIDE_SECONDS
+        if position < hide_at:
+            return (hide_at - position) / rate
+    return None

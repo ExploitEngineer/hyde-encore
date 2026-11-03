@@ -161,6 +161,8 @@ def test_next_word_boundary_mid_word_and_between():
     assert next_word_boundary(state(), 1000.0) == pytest.approx(1.5)  # start of "two"
     assert next_word_boundary(state(position=11.5), 1000.0) == pytest.approx(0.5)  # start of "two"
     assert next_word_boundary(state(position=11.5, rate=2.0), 1000.0) == pytest.approx(0.25)
-    assert next_word_boundary(state(position=13.5), 1000.0) is None  # after last word
+    # after the last word: wake at the gap-hide boundary (13.0 + GAP)
+    assert next_word_boundary(state(position=13.5), 1000.0) == pytest.approx(GAP_HIDE_SECONDS - 0.5)
+    assert next_word_boundary(state(position=13.0 + GAP_HIDE_SECONDS + 1), 1000.0) is None
     assert next_word_boundary(state(status="paused"), 1000.0) is None
     assert next_word_boundary(None, 1000.0) is None
