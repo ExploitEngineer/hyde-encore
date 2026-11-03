@@ -16,6 +16,17 @@ lrclib = true  # Fetch lyrics from lrclib.net.
 spicy_key = ""  # Spicy Lyrics API key (sl_sk_...) for word-level sync on Spotify. Get one at developers.spicylyrics.org.
 dirs = []  # Extra folders with 'Artist - Title.lrc' files. Defaults to $XDG_DATA_HOME/lyrics and ~/Music/Lyrics.
 
+# Lyrics overlay ('hyde-shell encore toggle').
+[encore.overlay]
+enable = false  # Start the overlay with the encore service.
+position = "bottom"  # Overlay block position: top, center or bottom.
+margin = 120  # Pixels between the overlay and the anchored screen edge.
+font = "JetBrainsMono Nerd Font"  # Overlay font family.
+size = 30  # Font size of the current line in pixels.
+next_line = true  # Show the dimmed next line under the current one.
+color = ""  # Color of sung words, e.g. "#CAAAF0". Empty uses the album accent.
+monitor = ""  # Monitor connector to show on, e.g. "eDP-1". Empty follows the compositor.
+
 # 'hyde-shell encore hyprlock' configuration.
 [encore.hyprlock]
 color = ""  # Color of sung words, e.g. "#CAAAF0". Empty uses the album accent.

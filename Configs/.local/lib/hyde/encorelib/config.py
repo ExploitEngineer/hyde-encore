@@ -27,6 +27,14 @@ class EncoreConfig:
     lrclib: bool = True
     hyprlock_color: str = ""
     hyprlock_dim: str = ""
+    overlay_enable: bool = False
+    overlay_position: str = "bottom"
+    overlay_margin: int = 120
+    overlay_font: str = "JetBrainsMono Nerd Font"
+    overlay_size: int = 30
+    overlay_next_line: bool = True
+    overlay_color: str = ""
+    overlay_monitor: str = ""
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -72,6 +80,20 @@ def _as_bool(value: str | None, default: bool) -> bool:
     return default
 
 
+def _as_int(value: str | None, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(_unquote(value))
+    except ValueError:
+        return default
+
+
+def _as_choice(value: str | None, allowed: tuple[str, ...], default: str) -> str:
+    v = _unquote(value or "").lower()
+    return v if v in allowed else default
+
+
 def _default_lyrics_dirs(env: Mapping[str, str]) -> tuple[Path, ...]:
     home = Path(env.get("HOME", str(Path.home())))
     data = Path(env.get("XDG_DATA_HOME") or home / ".local" / "share")
@@ -111,4 +133,14 @@ def load_config(env: Mapping[str, str] | None = None, env_file: Path | None = No
         lrclib=_as_bool(get("ENCORE_LYRICS_LRCLIB"), True),
         hyprlock_color=_unquote(get("ENCORE_HYPRLOCK_COLOR") or ""),
         hyprlock_dim=_unquote(get("ENCORE_HYPRLOCK_DIM") or ""),
+        overlay_enable=_as_bool(get("ENCORE_OVERLAY_ENABLE"), False),
+        overlay_position=_as_choice(
+            get("ENCORE_OVERLAY_POSITION"), ("top", "center", "bottom"), "bottom"
+        ),
+        overlay_margin=_as_int(get("ENCORE_OVERLAY_MARGIN"), 120),
+        overlay_font=_unquote(get("ENCORE_OVERLAY_FONT") or "") or "JetBrainsMono Nerd Font",
+        overlay_size=_as_int(get("ENCORE_OVERLAY_SIZE"), 30),
+        overlay_next_line=_as_bool(get("ENCORE_OVERLAY_NEXT_LINE"), True),
+        overlay_color=_unquote(get("ENCORE_OVERLAY_COLOR") or ""),
+        overlay_monitor=_unquote(get("ENCORE_OVERLAY_MONITOR") or ""),
     )

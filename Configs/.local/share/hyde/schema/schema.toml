@@ -45,6 +45,50 @@ type = "array"
 [properties.encore.properties.lyrics.properties.dirs.items]
 type = "string"
 
+[properties.encore.properties.overlay]
+description = "Lyrics overlay ('hyde-shell encore toggle')."
+type = "object"
+
+[properties.encore.properties.overlay.properties.enable]
+default = false
+description = "Start the overlay with the encore service."
+type = "boolean"
+
+[properties.encore.properties.overlay.properties.position]
+default = "bottom"
+description = "Overlay block position: top, center or bottom."
+type = "string"
+
+[properties.encore.properties.overlay.properties.margin]
+default = 120
+description = "Pixels between the overlay and the anchored screen edge."
+type = "integer"
+
+[properties.encore.properties.overlay.properties.font]
+default = "JetBrainsMono Nerd Font"
+description = "Overlay font family."
+type = "string"
+
+[properties.encore.properties.overlay.properties.size]
+default = 30
+description = "Font size of the current line in pixels."
+type = "integer"
+
+[properties.encore.properties.overlay.properties.next_line]
+default = true
+description = "Show the dimmed next line under the current one."
+type = "boolean"
+
+[properties.encore.properties.overlay.properties.color]
+default = ""
+description = "Color of sung words, e.g. \"#CAAAF0\". Empty uses the album accent."
+type = "string"
+
+[properties.encore.properties.overlay.properties.monitor]
+default = ""
+description = "Monitor connector to show on, e.g. \"eDP-1\". Empty follows the compositor."
+type = "string"
+
 [properties.encore.properties.hyprlock]
 description = "'hyde-shell encore hyprlock' configuration."
 type = "object"

@@ -6,8 +6,8 @@ The tree under `Configs/` mirrors HyDE's own layout so the work can be proposed 
 
 ## Status
 
-Plan 1 is done: the `encore` service, the lyrics engine and the `Encore` hyprlock layout.
-The lyrics overlay, edge glow and full-theme recolor come next.
+Plans 1 and 2 are done: the `encore` service, the lyrics engine, the `Encore` hyprlock layout, and the lyrics overlay.
+Next: more overlay styles (constellation, stack), the beat-reactive edge glow, and the full-theme recolor.
 See `docs/STATE.md`.
 
 ## What works today
@@ -18,6 +18,9 @@ See `docs/STATE.md`.
 - The album cover is run through HyDE's `wallbash.sh` to get a palette for the lyric highlight.
 - `hyde-shell encore status` prints the live state as JSON; the same JSON lines stream on `$XDG_RUNTIME_DIR/hyde/encore.sock`.
 - The `Encore` hyprlock layout shows the album art, title, artist and the lyric line with sung words highlighted.
+- `hyde-shell encore toggle` floats the current line above your windows: click-through, word-by-word feathered fill in the album accent, a baked glow and shadow, the next line dimmed below, and a slide-up cross-fade between lines.
+  It hides itself during instrumental gaps and reconnects if the service restarts.
+  Suggested bind: `hl.bind(MOD .. " + ALT + L", hl.dsp.exec_cmd("hyde-shell encore toggle"), {description = "[Utilities] toggle encore lyrics overlay"})` in `~/.config/hypr/hyprland.lua`.
 
 ## Try it from this checkout
 
@@ -62,6 +65,16 @@ dirs = []               # extra folders with "Artist - Title.lrc" files
 [encore.hyprlock]
 color = ""              # sung words; empty uses the album accent
 dim = ""                # unsung words; empty uses album text at 50%
+
+[encore.overlay]
+enable = false          # start the overlay with the service
+position = "bottom"     # top, center or bottom
+margin = 120
+font = "JetBrainsMono Nerd Font"
+size = 30
+next_line = true
+color = ""              # sung words; empty uses the album accent
+monitor = ""            # e.g. "eDP-1"
 ```
 
 ## Development

@@ -17,7 +17,9 @@
 - `Encore` hyprlock preview on screen: real cover, title, artist, word-by-word line, readable colors.
 
 ## In progress
-- Branch `fix/hyprlock-layout`: encore-provided cover/title/artist for hyprlock, contrast-aware accent, layout spacing. Not merged yet.
+- Branch `feat/encore-overlay` (Plan 2): lyrics overlay done, under final review. 167 tests.
+- Overlay measured: animating 6.5% of one core at a 30 fps sweep, paused and hidden 0%; see DECISIONS #10-#11.
+- Owner reference study (2026-11-04): 7 Verci/Lumn Instagram reels decoded to contact sheets; signature looks are bezel glow, constellation word-map, stacked mixed-font words, full-bleed album art. Drives Plans 3-5.
 - Auto-lyrics (vocal separation + Whisper) spike parked: owner confirmed the target song has no lyrics anywhere; revisit later. Venv and recording live in `~/.cache/hyde/encore/autosync/`.
 
 ## Known gaps (deferred from review)
@@ -28,8 +30,8 @@
 
 ## Next
 - Owner checks, then merge `feat/encore-core`.
-- Plan 2: lyrics overlay (GTK4 layer-shell, click-through, keybind toggle).
-- Plan 3: edge glow from HyDE's `cava.py` socket. Plan 4: `follow_album` spike and full-theme recolor.
+- Plan 3: overlay style system (constellation and stack modes, live switch).
+- Plan 4: edge glow from HyDE's `cava.py` socket, beat-reactive. Plan 5: `follow_album` spike, full-theme recolor, showcase video.
 
 ## Known facts
 - HyDE upstream bugs found (candidate small PRs): `hyprlock.sh find_filepath` uses `find -type f` without `-L`, so symlinked layouts are listed but fail to load; `hyprlock.sh fn_mpris` reads the first listed player, not the playing one.
