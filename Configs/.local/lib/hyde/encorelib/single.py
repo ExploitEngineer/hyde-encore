@@ -1,9 +1,18 @@
-"""Single-instance pidfile helpers for the overlay process."""
+"""Single-instance helpers for the overlay, built on flock.
+
+The pidfile carries an exclusive BSD lock for the owner's lifetime, so two
+racing claims can never both win, and a stale file from a crash is simply
+a file nobody holds locked.
+"""
 
 from __future__ import annotations
 
+import fcntl
 import os
 from pathlib import Path
+from typing import IO
+
+_held: dict[str, IO[str]] = {}
 
 
 def read_pid(path: Path) -> int | None:
@@ -29,30 +38,27 @@ def pid_alive(pid: int, marker: str = "encore") -> bool:
     return marker.encode() in cmdline
 
 
-def _write_own(path: Path) -> None:
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(f"{os.getpid()}\n", encoding="utf-8")
-    os.replace(tmp, path)
-
-
-def claim(path: Path, marker: str = "encore") -> bool:
-    """Claim the pidfile for this process; False when a live owner exists."""
+def claim(path: Path) -> bool:
+    """Take the pidfile lock for this process; False when someone holds it."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+", encoding="utf-8")  # noqa: SIM115 (held for process lifetime)
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-    except FileExistsError:
-        owner = read_pid(path)
-        if owner == os.getpid() or (owner is not None and pid_alive(owner, marker)):
-            return False
-        _write_own(path)
-        return True
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(f"{os.getpid()}\n")
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return False
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n")
+    handle.flush()
+    _held[str(path)] = handle
     return True
 
 
 def release(path: Path) -> None:
-    path = Path(path)
-    if read_pid(path) == os.getpid():
-        path.unlink(missing_ok=True)
+    handle = _held.pop(str(path), None)
+    if handle is None:
+        return
+    Path(path).unlink(missing_ok=True)
+    handle.close()  # closing drops the lock after the file is gone

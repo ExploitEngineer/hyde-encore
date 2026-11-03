@@ -25,7 +25,7 @@ from gi.repository import Gio, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
 from encorelib.config import EncoreConfig
-from encorelib.lyricview import HIDDEN, View, build_view, live_position
+from encorelib.lyricview import HIDDEN, View, build_view, should_transition
 from encorelib.palette import pick_accent
 from encorelib.stream import LineDecoder, should_connect
 from encorelib.wordrects import word_byte_ranges
@@ -167,7 +167,11 @@ class Overlay:
         self.decoder = LineDecoder()
         self.accent_rgb: tuple[float, float, float] = (1.0, 1.0, 1.0)
         self._accent_palette: dict | None = None
+        self.credit_track = ""
+        self.credit_until = 0.0
+        self.credit_timer = 0
         self.connection: Gio.SocketConnection | None = None
+        self.connecting = False
         self.cancel = Gio.Cancellable()
 
         self.window = Gtk.ApplicationWindow(application=app)
@@ -201,6 +205,7 @@ class Overlay:
         self.area.set_draw_func(self.on_draw)
         self.window.set_child(self.area)
         self.window.connect("realize", self._claim_input_shape)
+        self.window.connect("map", self._claim_input_shape)
         self._size_window()
         self.window.present()
         self.window.set_visible(False)
@@ -221,12 +226,16 @@ class Overlay:
                 break
         screen_w = monitor.get_geometry().width if monitor else 1920
         self.content_width = int(screen_w * WIDTH_FRACTION)
-        # two wrapped rows + next line + credit, with air
-        height = int(self.cfg.overlay_size * 3.2 + self.cfg.overlay_size * 0.6 * 2.6 + 24)
+        # room for two wrapped rows of the main and next lines plus the
+        # credit; the surface is transparent, so the slack is invisible
+        small = max(12, int(self.cfg.overlay_size * 0.55))
+        height = int(self.cfg.overlay_size * 4.6 + small * 5.6 + 56)
         self.window.set_default_size(self.content_width, height)
 
     def _claim_input_shape(self, window) -> None:
-        window.get_surface().set_input_region(cairo.Region())
+        surface = window.get_surface()
+        if surface is not None:
+            surface.set_input_region(cairo.Region())
 
     # socket ----------------------------------------------------------------
 
@@ -238,21 +247,27 @@ class Overlay:
     def _on_dir_event(self, _monitor, child, _other, event) -> None:
         if event not in (Gio.FileMonitorEvent.CREATED, Gio.FileMonitorEvent.CHANGED):
             return
-        if should_connect(child.get_path() or "") and self.connection is None:
+        if should_connect(child.get_path() or ""):
             self.try_connect()
 
     def try_connect(self) -> None:
-        if self.connection is not None or not os.path.exists(self.socket_path):
+        if self.connection is not None or self.connecting:
             return
+        if not os.path.exists(self.socket_path):
+            return
+        self.connecting = True
         client = Gio.SocketClient()
         address = Gio.UnixSocketAddress.new(self.socket_path)
         client.connect_async(address, self.cancel, self._on_connected)
 
     def _on_connected(self, client, result) -> None:
+        self.connecting = False
         try:
             self.connection = client.connect_finish(result)
         except GLib.Error:
+            # the daemon may be between bind() and listen(); retry shortly
             self.connection = None
+            GLib.timeout_add(300, self._late_retry)
             return
         self.decoder.reset()
         self._read_more()
@@ -291,20 +306,33 @@ class Overlay:
     def apply(self) -> None:
         now = time.monotonic()
         palette = (self.state or {}).get("palette") or {}
-        if palette is not self._accent_palette:
-            # pick_accent scans the palette; do it per state update, never per frame
+        if palette != self._accent_palette:
+            # pick_accent scans the palette; run it only when the palette changes
             self._accent_palette = palette
             if self.cfg.overlay_color:
                 self.accent_rgb = _hex_rgb(self.cfg.overlay_color)
             else:
                 self.accent_rgb = _hex_rgb(pick_accent(palette))
         view = build_view(self.state, now)
-        if view.line_key != self.view.line_key and self.view.visible:
+        if should_transition(self.view.line_key, view.line_key) and self.view.visible:
             raster = self._raster_for(self.view)
             if raster is not None and view.visible:
                 self.prev_draw = (raster, self.view)
                 self.transition_from = now
+        if not view.visible:
+            self.transition_from = None
+            self.prev_draw = None
         self.view = view
+        if view.visible:
+            track = view.line_key.rsplit(":", 1)[0]
+            if track != self.credit_track:
+                self.credit_track = track
+                self.credit_until = now + CREDIT_SECONDS
+                if self.credit_timer:
+                    GLib.source_remove(self.credit_timer)
+                self.credit_timer = GLib.timeout_add(
+                    int(CREDIT_SECONDS * 1000) + 80, self._credit_expired
+                )
         if self.timeout_id:
             GLib.source_remove(self.timeout_id)
             self.timeout_id = 0
@@ -425,19 +453,24 @@ class Overlay:
             cr.restore()
         if partial is not None:
             rects, fill = partial
-            total = sum(r[2] for r in rects) or 1.0
-            revealed = total * fill
-            for x, ry, rw, rh in rects:
-                take = min(rw, revealed)
+            feather = FEATHER_PX
+            spans = [
+                rw + (feather if i == len(rects) - 1 else 0)
+                for i, (_, _, rw, _) in enumerate(rects)
+            ]
+            revealed = sum(spans) * fill
+            for (x, ry, rw, rh), span in zip(rects, spans):
+                take = min(span, revealed)
                 revealed -= take
                 if take <= 0:
                     continue
+                # the ramp trails the edge, so a word rises from nothing and
+                # is fully lit once the edge has passed its end
                 edge = x + take
-                feather = min(FEATHER_PX, rw)
                 cr.save()
-                cr.rectangle(x - 2, ry - 4, take + feather + 2, rh + 8)
+                cr.rectangle(x - 2, ry - 4, min(take, rw) + 4, rh + 8)
                 cr.clip()
-                gradient = cairo.LinearGradient(edge, 0, edge + feather, 0)
+                gradient = cairo.LinearGradient(edge - feather, 0, edge, 0)
                 gradient.add_color_stop_rgba(0, 1, 1, 1, 1)
                 gradient.add_color_stop_rgba(1, 1, 1, 1, 0)
                 cr.set_source_surface(raster.bright, 0, 0)
@@ -501,15 +534,21 @@ class Overlay:
             cr.paint_with_alpha(0.6)
             cr.restore()
 
+    def _credit_expired(self) -> bool:
+        self.credit_timer = 0
+        self.area.queue_draw()
+        return False
+
     def _credit_text(self) -> str:
+        """The attribution line: the first 10 s a track's lyrics are on
+        screen, and whenever playback is paused."""
         state = self.state or {}
         lyrics = state.get("lyrics") or {}
         credit = lyrics.get("credit")
         if not credit:
             return ""
         paused = state.get("status") == "paused"
-        fresh = live_position(state, time.monotonic()) < CREDIT_SECONDS
-        return credit if (paused or fresh) else ""
+        return credit if (paused or time.monotonic() < self.credit_until) else ""
 
     def shutdown(self) -> None:
         self.cancel.cancel()

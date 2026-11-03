@@ -78,3 +78,14 @@ def build_view(state: dict | None, now: float) -> View:
         animating=animating,
         wake_in=wake_in,
     )
+
+
+def should_transition(old_key: str, new_key: str) -> bool:
+    """A slide cross-fade only makes sense between lines of the same track.
+
+    Across tracks the colors and timing belong to different songs, so the
+    overlay cuts instead of fading the old song into the new one.
+    """
+    if not old_key or not new_key or old_key == new_key:
+        return False
+    return old_key.rsplit(":", 1)[0] == new_key.rsplit(":", 1)[0]

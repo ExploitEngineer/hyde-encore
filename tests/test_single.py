@@ -29,23 +29,44 @@ def test_pid_alive_checks_marker():
 
 def test_claim_then_second_claim_fails(tmp_path):
     p = tmp_path / "pid"
-    assert claim(p, marker="python") is True
+    assert claim(p) is True
     assert read_pid(p) == os.getpid()
-    assert claim(p, marker="python") is False
+    assert claim(p) is False  # the lock is held, even within one process
 
 
-def test_claim_replaces_dead_pid(tmp_path):
+def test_claim_ignores_stale_pidfile_without_lock(tmp_path):
     p = tmp_path / "pid"
     p.write_text(str(dead_pid()))
-    assert claim(p, marker="python") is True
+    assert claim(p) is True
     assert read_pid(p) == os.getpid()
 
 
-def test_release_only_own_pid(tmp_path):
+def test_concurrent_claims_one_winner(tmp_path):
+    p = tmp_path / "pid"
+    code = (
+        "import sys; from encorelib.single import claim; sys.exit(0 if claim(sys.argv[1]) else 1)"
+    )
+    holder = (
+        "import sys, time; from encorelib.single import claim; "
+        "ok = claim(sys.argv[1]); time.sleep(1); sys.exit(0 if ok else 1)"
+    )
+    env = dict(os.environ, PYTHONPATH="Configs/.local/lib/hyde")
+    first = subprocess.Popen(["python3", "-c", holder, str(p)], env=env)
+    # the holder keeps the lock while it sleeps; a second claim must fail
+    import time
+
+    time.sleep(0.4)
+    second = subprocess.run(["python3", "-c", code, str(p)], check=False, env=env)
+    assert second.returncode == 1
+    first.wait()
+
+
+def test_release_only_own_claim(tmp_path):
     p = tmp_path / "pid"
     p.write_text(str(os.getpid() + 1))
-    release(p)
+    release(p)  # not ours: left alone
     assert p.exists()
-    p.write_text(str(os.getpid()))
+    p.unlink()
+    claim(p)
     release(p)
     assert not p.exists()

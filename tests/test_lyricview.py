@@ -112,3 +112,22 @@ def test_line_key_changes_with_track():
     other["track"] = dict(other["track"], key="beef02")
     b = build_view(other, 1000.0)
     assert a.line_key != b.line_key
+
+
+def test_should_transition_same_track_new_line():
+    from encorelib.lyricview import should_transition
+
+    assert should_transition("cafe01:3", "cafe01:4") is True
+
+
+def test_should_transition_not_across_tracks():
+    from encorelib.lyricview import should_transition
+
+    assert should_transition("cafe01:3", "beef02:0") is False
+
+
+def test_should_transition_needs_both_keys():
+    from encorelib.lyricview import should_transition
+
+    assert should_transition("", "cafe01:0") is False
+    assert should_transition("cafe01:0", "") is False
