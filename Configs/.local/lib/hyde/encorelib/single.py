@@ -43,7 +43,7 @@ def claim(path: Path, marker: str = "encore") -> bool:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     except FileExistsError:
         owner = read_pid(path)
-        if owner is not None and owner != os.getpid() and pid_alive(owner, marker):
+        if owner == os.getpid() or (owner is not None and pid_alive(owner, marker)):
             return False
         _write_own(path)
         return True
