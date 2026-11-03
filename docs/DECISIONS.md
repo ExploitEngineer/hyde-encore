@@ -23,3 +23,9 @@ HyDE's CHANGELOG.md gets edited in upstream PR branches only, an agreed exceptio
 
 ## 7. 2026-11-03 - New dependency gtk4-layer-shell - Active
 HyDE has no overlay surface mechanism; gtk4-layer-shell is in official Arch repos and lightest option from Python. Needs pkg_extra.lst entry upstream.
+
+## 8. 2026-11-03 - encore runs on system python3, not HyDE's venv - Active
+HyDE's venv (`$XDG_STATE_HOME/hyde/python_env`) is built with `include-system-site-packages = false` and cannot import `gi`, which encore needs for Playerctl and GTK4 layer-shell.
+System `python3` has `python-gobject`, `playerctl` and `gtk4-layer-shell` typelibs on Arch.
+`encore.sh` is the `hyde-shell` entry (hyde-shell prefers `.sh` over `.py`) and execs system `python3 encore.py`.
+`encorelib/` stays free of `gi` and third-party imports so it runs on either interpreter.

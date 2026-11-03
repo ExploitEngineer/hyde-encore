@@ -16,4 +16,6 @@ Goal is an upstream PR to HyDE-Project/HyDE, so everything must look like HyDE w
 - Prior art: see `docs/PRODUCT.md`.
 
 ## Commands
-None yet.
+- Tests: `python3 -m pytest -q`
+- Lint: `uvx ruff check Configs tests` and `uvx ruff format --check Configs tests`
+- Python runs on system `python3` (DECISIONS #8); `encorelib/` must not import `gi`.
