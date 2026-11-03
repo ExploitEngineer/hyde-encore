@@ -4,18 +4,25 @@
 - `encorelib/`: LRC and enhanced LRC parser, word-timing estimator, cursor lookup, playback clock, config loader (verified against HyDE's real `config.lua` output), providers (local `.lrc`, LRCLIB with junk-upload filter, Spicy Lyrics), lyrics cache, album palette via `wallbash.sh` on a 256px cover, JSON-lines state protocol, hyprlock markup.
 - `encore.py` daemon plus `encore.sh` hyde-shell entry: follows the most recently started MPRIS player, worker-thread fetches guarded against stale results, `daemon [--if-enabled]`, `status`, `hyprlock`.
 - `Encore.conf` hyprlock layout; schema, config and `hc.start` autostart fragments for upstream.
-- 114 unit tests; `tests/e2e/fake_mpris.py` scriptable MPRIS player for end-to-end runs.
+- Lookup rules (`encorelib/lookup.py`): local `.lrc` always wins and is never cached; provider errors are never cached; cache key includes enabled sources.
+- 125 unit tests; `tests/e2e/fake_mpris.py` scriptable MPRIS player for end-to-end runs.
 
 ## Measured (fake MPRIS player, this laptop, 2026-11-03)
 - Playing: about 0.4% of one core, about 40 MB RSS.
-- Paused: 0 CPU ticks over 10 s, 0 to 1.4 context switches per second across runs (target under 1, recheck with the overlay).
+- Paused: 0 CPU ticks over 10 s; 0 to 1.4 context switches per second across runs, 0 on the latest run.
 - E2E verified: word-by-word line follows playback, seek forward and back lands within 0.3 s, three fast skips end on the right song, two players hand over correctly, clean shutdown removes runtime files.
 
 ## In progress
 - Owner checks still open: real Spotify session, and the `Encore` hyprlock layout on screen (preview and real lock).
 
+## Known gaps (deferred from review)
+- Empty artist still sends `artist_name=` to LRCLIB search; no `feat.`-stripped retry.
+- Fast skipping spawns one fetch and palette thread per track (results are discarded safely).
+- Last sung word stays lit through long unmarked instrumental gaps; CJK lines light as one word.
+- Playback rate fixed at 1.0; no automated test of the GLib daemon class.
+
 ## Next
-- Final whole-branch review of Plan 1, then merge.
+- Owner checks, then merge `feat/encore-core`.
 - Plan 2: lyrics overlay (GTK4 layer-shell, click-through, keybind toggle).
 - Plan 3: edge glow from HyDE's `cava.py` socket. Plan 4: `follow_album` spike and full-theme recolor.
 
@@ -32,4 +39,4 @@
 - A `hyde-shell encore lrc` command to save the current lyrics as a local `.lrc` for offline use and hand-tuning.
 - Waybar module showing the current lyric line from `encore.sock`.
 
-verified: 1579d06 2026-11-03
+verified: db72dca 2026-11-03
