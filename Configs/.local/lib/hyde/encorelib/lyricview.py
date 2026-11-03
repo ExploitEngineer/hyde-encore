@@ -108,7 +108,8 @@ def next_word_boundary(state: dict | None, now: float) -> float | None:
     words = line.get("words") or []
     position = live_position(state, now)
     rate = state.get("rate", 1.0) or 1.0
-    boundaries = [b for w in words for b in (w["start"], w["end"]) if b > position]
+    # only word STARTS change what is on screen; ends inside a line do not
+    boundaries = [w["start"] for w in words if w["start"] > position]
     if not boundaries:
         return None
     return (min(boundaries) - position) / rate

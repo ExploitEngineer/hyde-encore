@@ -338,7 +338,12 @@ class Overlay:
             return
         for obj in self.decoder.feed(data.get_data()):
             self.state = obj
-        self.apply()
+        try:
+            self.apply()
+        except Exception:
+            import logging
+
+            logging.getLogger("encore").exception("overlay apply failed")
         self._read_more()
 
     def _disconnect(self) -> None:
@@ -444,6 +449,13 @@ class Overlay:
         if self.style == "line":
             still = view.animating or self.transition_from
         else:
+            ix = current_word_index(view) if view.visible else None
+            if view.visible and (ix, view.line_key) != (self.last_word_ix, self._last_fade_key):
+                # a fast word started inside the previous pop: restart the pop
+                self.last_word_ix = ix
+                self._last_fade_key = view.line_key
+                if ix is not None and ix >= 0:
+                    self.fade_from = now
             still = (now - self.fade_from) < POP_SECONDS
         if changed_key or not view.visible or not still:
             self.anim_id = 0

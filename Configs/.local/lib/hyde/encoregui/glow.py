@@ -8,6 +8,7 @@ shows a faint static glow; stopped hides entirely.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import time
@@ -47,9 +48,10 @@ def _hex_rgb(color: str) -> tuple[float, float, float]:
 class _SocketFeed:
     """Line-based reader with reconnect, for encore.sock and cava.sock."""
 
-    def __init__(self, path: str, on_line, cancel: Gio.Cancellable):
+    def __init__(self, path: str, on_line, cancel: Gio.Cancellable, on_close=None):
         self.path = path
         self.on_line = on_line
+        self.on_close = on_close
         self.cancel = cancel
         self.decoder_tail = b""
         self.connection: Gio.SocketConnection | None = None
@@ -70,6 +72,7 @@ class _SocketFeed:
             self.connection = None
             GLib.timeout_add(500, lambda: (self.try_connect(), False)[1])
             return
+        self.decoder_tail = b""
         self._read_more()
 
     def _read_more(self) -> None:
@@ -85,13 +88,19 @@ class _SocketFeed:
             if self.connection is not None:
                 self.connection.close(None)
                 self.connection = None
+            if self.on_close is not None:
+                self.on_close()
+            GLib.timeout_add(500, lambda: (self.try_connect(), False)[1])
             return
         self.decoder_tail += data.get_data()
         *lines, self.decoder_tail = self.decoder_tail.split(b"\n")
         if len(self.decoder_tail) > 65536:
             self.decoder_tail = b""
         for line in lines:
-            self.on_line(line)
+            try:
+                self.on_line(line)
+            except Exception:
+                logging.getLogger("encore").exception("glow feed line failed")
         self._read_more()
 
 
@@ -141,10 +150,14 @@ class Glow:
             window.connect("realize", claim)
             window.connect("map", claim)
             window.present()
+            window.set_visible(False)  # nothing shows until the daemon speaks
             self.windows.append((name, window, area))
 
         self.state_feed = _SocketFeed(
-            os.path.join(runtime_dir, "encore.sock"), self._on_state_line, self.cancel
+            os.path.join(runtime_dir, "encore.sock"),
+            self._on_state_line,
+            self.cancel,
+            on_close=self._on_state_gone,
         )
         self.cava_feed = _SocketFeed(
             os.path.join(runtime_dir, "cava.sock"), self._on_cava_line, self.cancel
@@ -154,6 +167,11 @@ class Glow:
         self.monitor.connect("changed", self._on_dir_event)
         self.state_feed.try_connect()
         self.cava_feed.try_connect()
+        self._schedule()
+
+    def _on_state_gone(self) -> None:
+        self.status = "stopped"
+        self._schedule()
 
     # feeds ------------------------------------------------------------------
 

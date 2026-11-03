@@ -408,6 +408,7 @@ def run_glow_toggle() -> int:
 
 
 def run_style(name: str) -> int:
+    name = name.strip().lower()
     from encorelib.stream import STYLES, read_style
 
     current = read_style(STYLE_PATH) or load_config().overlay_style

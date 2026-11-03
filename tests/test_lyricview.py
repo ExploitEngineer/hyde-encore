@@ -158,7 +158,7 @@ def test_current_word_index():
 def test_next_word_boundary_mid_word_and_between():
     from encorelib.lyricview import next_word_boundary
 
-    assert next_word_boundary(state(), 1000.0) == pytest.approx(0.5)  # end of "one"
+    assert next_word_boundary(state(), 1000.0) == pytest.approx(1.5)  # start of "two"
     assert next_word_boundary(state(position=11.5), 1000.0) == pytest.approx(0.5)  # start of "two"
     assert next_word_boundary(state(position=11.5, rate=2.0), 1000.0) == pytest.approx(0.25)
     assert next_word_boundary(state(position=13.5), 1000.0) is None  # after last word
