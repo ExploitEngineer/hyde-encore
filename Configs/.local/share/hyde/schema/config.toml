@@ -1,0 +1,22 @@
+# Fragment for upstream Configs/.local/share/hyde/schema/config.toml.
+# Merge these sections in; generated upstream by ./gen-config.py from schema.toml.
+
+# Generic desktop autostart configuration (encore entry only).
+[desktop.start]
+encore = "hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-encore.service -t service -- encore.sh daemon --if-enabled"  # encore lyrics service, runs only when [encore] enable = true.
+
+# encore.py configuration: word-by-word synced lyrics and album colors.
+[encore]
+enable = false  # Start the encore service with the session.
+players = []  # Only follow these MPRIS players, e.g. ["spotify"]. Empty follows any player.
+
+# encore lyrics sources.
+[encore.lyrics]
+lrclib = true  # Fetch lyrics from lrclib.net.
+spicy_key = ""  # Spicy Lyrics API key (sl_sk_...) for word-level sync on Spotify. Get one at developers.spicylyrics.org.
+dirs = []  # Extra folders with 'Artist - Title.lrc' files. Defaults to $XDG_DATA_HOME/lyrics and ~/Music/Lyrics.
+
+# 'hyde-shell encore hyprlock' configuration.
+[encore.hyprlock]
+color = ""  # Color of sung words, e.g. "#CAAAF0". Empty uses the album accent.
+dim = ""  # Color of words not yet sung, e.g. "#FFFFFF80". Empty uses the album text color at 50%.

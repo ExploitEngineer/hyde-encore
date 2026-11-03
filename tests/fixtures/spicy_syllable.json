@@ -1,0 +1,41 @@
+{
+  "Status": 200,
+  "Type": "object",
+  "Body": {
+    "id": "4uLU6hMCjMI75M1A2tKUQC",
+    "source": "spicy_lyrics",
+    "UploadAttribution": {
+      "Uploader": {"id": "1", "username": "uploader1", "url": "https://spicylyrics.org/uid/1"},
+      "Maker": {"id": "2", "username": "maker2", "url": "https://spicylyrics.org/uid/2"}
+    },
+    "Type": "Syllable",
+    "StartTime": 10.0,
+    "EndTime": 14.0,
+    "Content": [
+      {
+        "Type": "Vocal",
+        "OppositeAligned": false,
+        "Lead": {
+          "StartTime": 10.0,
+          "EndTime": 12.0,
+          "Syllables": [
+            {"Text": "Nev", "StartTime": 10.0, "EndTime": 10.3, "IsPartOfWord": true},
+            {"Text": "er", "StartTime": 10.3, "EndTime": 10.6, "IsPartOfWord": false},
+            {"Text": "gonna", "StartTime": 10.6, "EndTime": 11.2, "IsPartOfWord": false}
+          ]
+        },
+        "Background": [
+          {"StartTime": 11.0, "EndTime": 11.5, "Syllables": [{"Text": "(ooh)", "StartTime": 11.0, "EndTime": 11.5}]}
+        ]
+      },
+      {
+        "Type": "Vocal",
+        "Lead": {
+          "StartTime": 12.5,
+          "EndTime": 14.0,
+          "Syllables": [{"Text": "give", "StartTime": 12.5, "EndTime": 13.0, "IsPartOfWord": false}]
+        }
+      }
+    ]
+  }
+}

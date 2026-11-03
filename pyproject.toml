@@ -1,0 +1,11 @@
+# Dev tooling for this repo only. Upstream HyDE ships its own pyproject in
+# Configs/.local/lib/hyde; encore adds no runtime Python dependencies.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint.isort]
+known-first-party = ["encorelib", "pyutils"]

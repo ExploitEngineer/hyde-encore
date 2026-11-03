@@ -1,0 +1,60 @@
+# Fragment for upstream Configs/.local/share/hyde/schema/schema.toml.
+# Merge these properties in, then regenerate config.toml, config.md and config.toml.json.
+
+[properties.desktop.properties.start.properties.encore]
+default = "hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-encore.service -t service -- encore.sh daemon --if-enabled"
+description = "encore lyrics service, runs only when [encore] enable = true."
+type = "string"
+
+[properties.encore]
+description = "encore.py configuration: word-by-word synced lyrics and album colors."
+type = "object"
+
+[properties.encore.properties.enable]
+default = false
+description = "Start the encore service with the session."
+type = "boolean"
+
+[properties.encore.properties.players]
+default = []
+description = "Only follow these MPRIS players, e.g. [\"spotify\"]. Empty follows any player."
+type = "array"
+
+[properties.encore.properties.players.items]
+type = "string"
+
+[properties.encore.properties.lyrics]
+description = "encore lyrics sources."
+type = "object"
+
+[properties.encore.properties.lyrics.properties.lrclib]
+default = true
+description = "Fetch lyrics from lrclib.net."
+type = "boolean"
+
+[properties.encore.properties.lyrics.properties.spicy_key]
+default = ""
+description = "Spicy Lyrics API key (sl_sk_...) for word-level sync on Spotify. Get one at developers.spicylyrics.org."
+type = "string"
+
+[properties.encore.properties.lyrics.properties.dirs]
+default = []
+description = "Extra folders with 'Artist - Title.lrc' files. Defaults to $XDG_DATA_HOME/lyrics and ~/Music/Lyrics."
+type = "array"
+
+[properties.encore.properties.lyrics.properties.dirs.items]
+type = "string"
+
+[properties.encore.properties.hyprlock]
+description = "'hyde-shell encore hyprlock' configuration."
+type = "object"
+
+[properties.encore.properties.hyprlock.properties.color]
+default = ""
+description = "Color of sung words, e.g. \"#CAAAF0\". Empty uses the album accent."
+type = "string"
+
+[properties.encore.properties.hyprlock.properties.dim]
+default = ""
+description = "Color of words not yet sung, e.g. \"#FFFFFF80\". Empty uses the album text color at 50%."
+type = "string"

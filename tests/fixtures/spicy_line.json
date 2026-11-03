@@ -1,0 +1,4 @@
+{"Status": 200, "Type": "object", "Body": {"id": "4uLU6hMCjMI75M1A2tKUQC", "source": "spotify", "Type": "Line", "Content": [
+  {"Type": "Vocal", "Text": "Line one", "StartTime": 5.0, "EndTime": 7.0},
+  {"Type": "Vocal", "Text": "Line two", "StartTime": 7.5, "EndTime": 9.0}
+]}}
