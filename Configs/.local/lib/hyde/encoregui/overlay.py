@@ -12,6 +12,7 @@ until the next word; paused, hidden or lyric-less states run nothing.
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import time
@@ -26,6 +27,7 @@ from gi.repository import Gtk4LayerShell as LayerShell
 
 from encorelib.config import EncoreConfig
 from encorelib.constellation import place_words, sparkles
+from encorelib.look import effective, read_look
 from encorelib.lyricview import (
     HIDDEN,
     View,
@@ -35,7 +37,7 @@ from encorelib.lyricview import (
     should_transition,
 )
 from encorelib.palette import pick_accent
-from encorelib.stream import LineDecoder, read_style, should_connect
+from encorelib.stream import LineDecoder, should_connect
 from encorelib.wordrects import word_byte_ranges
 
 TRANSITION_SECONDS = 0.22
@@ -178,8 +180,10 @@ class Overlay:
         self.rasters: dict[tuple, LineRaster] = {}
         self.small: dict[tuple, LineRaster] = {}
         self.word_cache: dict[tuple, tuple[cairo.ImageSurface, float, float]] = {}
-        self.style_path = os.path.join(runtime_dir, "encore.style")
-        self.style = read_style(self.style_path) or cfg.overlay_style
+        self.look_path = os.path.join(runtime_dir, "encore.look")
+        self.style, self.font, self.size, self.color_override, self.show_next = effective(
+            cfg, read_look(self.look_path)
+        )
         self.fade_from = 0.0
         self.last_word_ix: int | None = None
         self._last_fade_key = ""
@@ -265,8 +269,8 @@ class Overlay:
         self.content_width = int(screen_w * WIDTH_FRACTION)
         # room for two wrapped rows of the main and next lines plus the
         # credit; the surface is transparent, so the slack is invisible
-        small = max(12, int(self.cfg.overlay_size * 0.55))
-        height = int(self.cfg.overlay_size * 4.6 + small * 5.6 + 56)
+        small = max(12, int(self.size * 0.55))
+        height = int(self.size * 4.6 + small * 5.6 + 56)
         self.window.set_default_size(self.content_width, height)
 
     def _claim_input_shape(self, window) -> None:
@@ -287,19 +291,25 @@ class Overlay:
         path = child.get_path() or ""
         if should_connect(path):
             self.try_connect()
-        if os.path.basename(path) == "encore.style":
-            self._reload_style()
+        if os.path.basename(path) == "encore.look":
+            self._reload_look()
 
-    def _reload_style(self) -> None:
-        style = read_style(self.style_path) or self.cfg.overlay_style
-        if style == self.style:
+    def _reload_look(self) -> None:
+        new = effective(self.cfg, read_look(self.look_path))
+        old = (self.style, self.font, self.size, self.color_override, self.show_next)
+        if new == old:
             return
-        self.style = style
+        style_changed = new[0] != self.style
+        self.style, self.font, self.size, self.color_override, self.show_next = new
+        for cache in (self.rasters, self.small, self.word_cache, self.places):
+            cache.clear()
+        self._accent_palette = None  # force accent recompute (color override)
         self.transition_from = None
         self.prev_draw = None
         self.last_word_ix = None
         self.fade_from = 0.0
-        self._apply_style_geometry()
+        if style_changed:
+            self._apply_style_geometry()
         self.apply()
 
     def try_connect(self) -> None:
@@ -366,8 +376,8 @@ class Overlay:
         if palette != self._accent_palette:
             # pick_accent scans the palette; run it only when the palette changes
             self._accent_palette = palette
-            if self.cfg.overlay_color:
-                self.accent_rgb = _hex_rgb(self.cfg.overlay_color)
+            if self.color_override:
+                self.accent_rgb = _hex_rgb(self.color_override)
             else:
                 self.accent_rgb = _hex_rgb(pick_accent(palette))
         view = build_view(self.state, now)
@@ -393,8 +403,11 @@ class Overlay:
         if self.timeout_id:
             GLib.source_remove(self.timeout_id)
             self.timeout_id = 0
-        if view.visible != self.window.get_visible():
-            self.window.set_visible(view.visible)
+        show_window = view.visible or self._card_active()
+        if show_window != self.window.get_visible():
+            self.window.set_visible(show_window)
+        if show_window and not view.visible:
+            self.area.queue_draw()  # the card is state-driven, no timers
         if self.style == "line":
             in_transition = self.transition_from is not None
             active = view.visible and (view.animating or in_transition)
@@ -472,14 +485,14 @@ class Overlay:
     def _raster_for(self, view: View) -> LineRaster | None:
         if not view.visible:
             return None
-        key = (view.line_key, self.cfg.overlay_size, self._accent())
+        key = (view.line_key, self.size, self._accent())
         raster = self.rasters.get(key)
         if raster is None:
             raster = LineRaster(
                 view.text,
                 [w for w, _ in view.words],
-                self.cfg.overlay_font,
-                self.cfg.overlay_size,
+                self.font,
+                self.size,
                 self.content_width,
                 self._accent(),
                 self.area.get_scale_factor() or 1,
@@ -492,14 +505,14 @@ class Overlay:
     def _small_raster(self, text: str, alpha_key: str) -> LineRaster | None:
         if not text:
             return None
-        size = max(12, int(self.cfg.overlay_size * 0.55))
+        size = max(12, int(self.size * 0.55))
         key = (text, size, alpha_key)
         raster = self.small.get(key)
         if raster is None:
             raster = LineRaster(
                 text,
                 [],
-                self.cfg.overlay_font,
+                self.font,
                 size,
                 self.content_width,
                 (1, 1, 1),
@@ -571,7 +584,7 @@ class Overlay:
         scale = self.area.get_scale_factor() or 1
         measure = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
         layout = PangoCairo.create_layout(cairo.Context(measure))
-        family = "Serif" if italic else self.cfg.overlay_font
+        family = "Serif" if italic else self.font
         desc = Pango.FontDescription.from_string(family + (" Italic" if italic else " Bold"))
         desc.set_absolute_size(size * Pango.SCALE)
         layout.set_font_description(desc)
@@ -629,14 +642,14 @@ class Overlay:
         cy = height * 0.46
         if 0 <= ix < len(texts):
             surface, w, h = self._word_surface(
-                texts[ix], int(self.cfg.overlay_size * STACK_SCALE), self.accent_rgb, False
+                texts[ix], int(self.size * STACK_SCALE), self.accent_rgb, False
             )
             alpha, zoom = self._pop(now)
             self._paint_word(cr, surface, w, h, width / 2, cy, alpha, zoom)
             top, bottom = cy - h / 2, cy + h / 2
         else:
             top = bottom = cy
-        small = max(13, int(self.cfg.overlay_size * 0.85))
+        small = max(13, int(self.size * 0.85))
         if ix > 0:
             surface, w, h = self._word_surface(texts[ix - 1], small, (1, 1, 1), True, italic=True)
             self._paint_word(cr, surface, w, h, width / 2, top - 18 - h / 2, 0.8)
@@ -667,17 +680,15 @@ class Overlay:
             cr.move_to(*positions[i])
             cr.line_to(*positions[i + 1])
             cr.stroke()
-        spark, sw, sh = self._word_surface(
-            "✦", max(11, self.cfg.overlay_size // 2), (1, 1, 1), True
-        )
+        spark, sw, sh = self._word_surface("✦", max(11, self.size // 2), (1, 1, 1), True)
         for sx, sy in sparkles(view.line_key, width, height, SPARKS):
             self._paint_word(cr, spark, sw, sh, sx, sy, 0.5)
-        past = max(13, int(self.cfg.overlay_size * PAST_SCALE))
+        past = max(13, int(self.size * PAST_SCALE))
         for i in range(ix):
             surface, w, h = self._word_surface(texts[i], past, (1, 1, 1), True)
             self._paint_word(cr, surface, w, h, *positions[i], 0.85)
         surface, w, h = self._word_surface(
-            texts[ix], int(self.cfg.overlay_size * CONSTELLATION_SCALE), self.accent_rgb, False
+            texts[ix], int(self.size * CONSTELLATION_SCALE), self.accent_rgb, False
         )
         alpha, zoom = self._pop(now)
         self._paint_word(cr, surface, w, h, *positions[ix], alpha, zoom)
@@ -695,9 +706,70 @@ class Overlay:
         cr.paint_with_alpha(0.6)
         cr.restore()
 
+    def _card_active(self) -> bool:
+        if self.style == "line":
+            return False  # the strip window has no room for the card
+        state = self.state or {}
+        if state.get("status") not in ("playing", "paused") or not state.get("track"):
+            return False
+        lyrics = state.get("lyrics")
+        return lyrics is None or lyrics.get("sync") == "none"
+
+    def _cover_surface(self, path: str):
+        hit = self.word_cache.get(("cover", path))
+        if hit is not None:
+            return hit
+        try:
+            surface = cairo.ImageSurface.create_from_png(path)
+        except (cairo.Error, OSError, TypeError):
+            surface = None
+        out = (surface, 0.0, 0.0)
+        self.word_cache[("cover", path)] = out
+        return out
+
+    def _draw_card(self, cr, width, height) -> None:
+        track = (self.state or {}).get("track") or {}
+        art = track.get("art") or ""
+        size = 280.0
+        cx, cy = width / 2, height * 0.44
+        surface, _w, _h = self._cover_surface(art) if art else (None, 0, 0)
+        if surface is not None:
+            iw, ih = surface.get_width(), surface.get_height()
+            cr.save()
+            x, y = cx - size / 2, cy - size / 2
+            radius = 22
+            cr.new_sub_path()
+            cr.arc(x + size - radius, y + radius, radius, -math.pi / 2, 0)
+            cr.arc(x + size - radius, y + size - radius, radius, 0, math.pi / 2)
+            cr.arc(x + radius, y + size - radius, radius, math.pi / 2, math.pi)
+            cr.arc(x + radius, y + radius, radius, math.pi, 3 * math.pi / 2)
+            cr.close_path()
+            cr.clip()
+            cr.translate(x, y)
+            cr.scale(size / max(1, iw), size / max(1, ih))
+            cr.set_source_surface(surface, 0, 0)
+            cr.paint()
+            cr.restore()
+        title = track.get("title") or ""
+        artist = track.get("artist") or ""
+        y = cy + size / 2 + 18
+        if title:
+            ts, tw, th = self._word_surface(
+                title[:60], max(20, int(self.size * 0.85)), (1, 1, 1), False
+            )
+            self._paint_word(cr, ts, tw, th, cx, y + th / 2)
+            y += th + 2
+        if artist:
+            asf, aw, ah = self._word_surface(
+                artist[:60], max(14, int(self.size * 0.55)), (1, 1, 1), True
+            )
+            self._paint_word(cr, asf, aw, ah, cx, y + ah / 2, 0.85)
+
     def on_draw(self, _area, cr, width, height, *_):
         view = self.view
         if not view.visible:
+            if self._card_active():
+                self._draw_card(cr, width, height)
             return
         if self.style == "stack":
             self._draw_stack(cr, width, height, view)
@@ -711,9 +783,7 @@ class Overlay:
         if raster is None:
             return
         now = time.monotonic()
-        next_raster = (
-            self._small_raster(view.next_text, "next") if self.cfg.overlay_next_line else None
-        )
+        next_raster = self._small_raster(view.next_text, "next") if self.show_next else None
         credit = self._credit_text()
         credit_raster = self._small_raster(credit, "credit") if credit else None
 
