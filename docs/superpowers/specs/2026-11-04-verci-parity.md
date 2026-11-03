@@ -39,3 +39,16 @@ Source: `.reference/r1..r7.mp4` (local only, never committed). Sheets regenerate
 3. Card v2 = bigger art, shadow, decorative pill rows.
 4. New style `visual` = full-bleed cover + rolling column + glyph dict.
 5. Glow: thicker default, calmer flow at low energy.
+
+## Official assets (public site, verci.xyz / trylumn.xyz, 2026-11-04)
+Pulled with REA browser capture + curl into `.reference/site/` (gitignored): verci-hero.mp4 (1600x900, 12 s), verci-styles.png, verci-settings.png, lumn-demo.mp4 (3024x1964, 64 s). We study their public site and videos only; their paid app binary is not decompiled (EULA, and we must not copy their code).
+
+### Three separate UIs (we had merged them - wrong)
+1. **Verci menu** (menu-bar dropdown, native NSMenu look): Style list with checks, Keep Screen Awake, Non-lockscreen Visibility, Font list (SF Pro, SF Rounded, New York, Helvetica Neue, Avenir Next, Futura, Didot), Text Size slider + Reset, Display (monitor with check), Color: Auto Sync, **Lyric Text... / Highlight... / Secondary Text...** each with a swatch, Reset Colors, Check for Updates, License, Quit. Dark #1d1a1b, grey section headers, white items, thin separators.
+2. **Player window** (Lumn main window, an ordinary app window): dark, rounded art (~240 px) with a thin light ring and an album-tinted radial glow behind it, bold title, dim artist, round controls (15 s back, prev, big play/pause, next, 15 s forward), a "Lyrics" pill + history button, bottom toolbar (palette, waveform, bulb, **Settings** pill, display, lock-screen, window). Hovering the art expands it and tints the window. Lyrics mode: card with art + controls on the left, scrolling lyric list on the right (current line bold white, others dim, fade at the bottom).
+3. **Lumn settings popover**: Gradient (1 Color / 2 Colors), Animation (Music Sync / ...), Notch compatibility, Thickness slider, Glow slider, Override album color with **Primary 60% / Secondary 40% color wheels + brightness**, Display picker, Lock screen player, Show in Dock, version/updates, Quit.
+
+### Visual-style column semantics (hero video at 6 fps)
+- Three slots scrolling upward: top = word two back (small, often italic), **middle = the word just sung (big)**, **bottom = the word being sung now, on a skewed Highlight-colored marker block**, with an SF-Symbol-like icon beside some words (person, eye, car, play, runner, speech bubble, dice, wind, phone, hourglass, clock).
+- Slight 3D drum tilt; ghost overlap during the scroll.
+- Three colors: Lyric Text (light pink), Highlight (magenta block), Secondary (mauve); Auto Sync derives all three from the cover.
