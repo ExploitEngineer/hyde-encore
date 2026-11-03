@@ -61,7 +61,13 @@ def build_state(
             else None
         ),
         "lyrics": (
-            {"sync": lyrics.sync, "source": lyrics.source, "credit": lyrics.credit}
+            {
+                "sync": lyrics.sync,
+                "source": lyrics.source,
+                "credit": lyrics.credit,
+                # every line once, for clients that show the whole song
+                "lines": [{"start": ln.start, "text": ln.text} for ln in lyrics.lines],
+            }
             if lyrics is not None
             else None
         ),

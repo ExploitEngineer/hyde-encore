@@ -16,13 +16,15 @@ import math
 import os
 import sys
 import time
+from typing import ClassVar
 
 import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
-from gi.repository import Gio, GLib, Gtk, Pango, PangoCairo
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
 from encorelib.config import EncoreConfig
@@ -48,7 +50,7 @@ SLIDE_PX = 26
 FEATHER_PX = 26
 CREDIT_SECONDS = 10.0
 POP_SECONDS = 0.16
-SLIDE_SECONDS = 0.24
+SLIDE_SECONDS = 0.2
 EXIT_SECONDS = 0.26
 COLUMN_ROWS = 3
 CONSTELLATION_SCALE = 1.2
@@ -192,6 +194,7 @@ class Overlay:
             self.show_next,
             self.motion,
         ) = effective(cfg, read_look(self.look_path))
+        self.look_cache = read_look(self.look_path)
         self.fade_from = 0.0
         self.slide_from = 0.0
         self.exit_from = 0.0
@@ -229,9 +232,39 @@ class Overlay:
         Gtk.StyleContext.add_provider_for_display(
             self.window.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_USER
         )
+        # stage: a static background layer (visual style's album art,
+        # pre-scaled once per cover) under the word canvas; for stack and
+        # visual the canvas is a centered region, so frames repaint less
+        self.stage = Gtk.Overlay()
+        self.stage.set_child(Gtk.Box())
         self.area = Gtk.DrawingArea()
         self.area.set_draw_func(self.on_draw)
-        self.window.set_child(self.area)
+        self.stage.add_overlay(self.area)
+        self.window.set_child(self.stage)
+        # visual style's album art lives in its own window one layer lower:
+        # the compositor stacks the two on the GPU and the art never redraws
+        self.bg_window = Gtk.Window(application=app)
+        LayerShell.init_for_window(self.bg_window)
+        LayerShell.set_layer(self.bg_window, LayerShell.Layer.TOP)
+        LayerShell.set_namespace(self.bg_window, "encore-visual")
+        LayerShell.set_keyboard_mode(self.bg_window, LayerShell.KeyboardMode.NONE)
+        for edge in (
+            LayerShell.Edge.TOP,
+            LayerShell.Edge.BOTTOM,
+            LayerShell.Edge.LEFT,
+            LayerShell.Edge.RIGHT,
+        ):
+            LayerShell.set_anchor(self.bg_window, edge, True)
+        LayerShell.set_exclusive_zone(self.bg_window, -1)
+        self.bg = Gtk.Picture()
+        self.bg.set_content_fit(Gtk.ContentFit.FILL)
+        self.bg.set_can_shrink(True)
+        self.bg_art = ""
+        self.bg_window.set_child(self.bg)
+        self.bg_window.connect("realize", self._claim_input_shape)
+        self.bg_window.connect("map", self._claim_input_shape)
+        self._layout_stage()
+
         self.window.connect("realize", self._claim_input_shape)
         self.window.connect("map", self._claim_input_shape)
         self._size_window()
@@ -277,12 +310,78 @@ class Overlay:
                 monitor = m
                 break
         screen_w = monitor.get_geometry().width if monitor else 1920
+        screen_h = monitor.get_geometry().height if monitor else 1080
+        self.screen_w, self.screen_h = screen_w, screen_h
         self.content_width = int(screen_w * WIDTH_FRACTION)
+        self._layout_stage()
         # room for two wrapped rows of the main and next lines plus the
         # credit; the surface is transparent, so the slack is invisible
         small = max(12, int(self.size * 0.55))
         height = int(self.size * 4.6 + small * 5.6 + 56)
         self.window.set_default_size(self.content_width, height)
+
+    def _layout_stage(self) -> None:
+        """Canvas region and background visibility for the current style."""
+        if not hasattr(self, "bg"):  # geometry runs once before the stage exists
+            return
+        visual = self.style == "visual"
+        column = self.style in ("stack", "visual")
+        self._sync_bg_window()
+        if column:
+            self.area.set_halign(Gtk.Align.CENTER)
+            self.area.set_valign(Gtk.Align.CENTER)
+            self.area.set_size_request(int(self.screen_w * 0.8), int(self.screen_h * 0.8))
+        else:
+            self.area.set_halign(Gtk.Align.FILL)
+            self.area.set_valign(Gtk.Align.FILL)
+            self.area.set_size_request(-1, -1)
+        if visual:
+            self._update_background()
+
+    def _sync_bg_window(self) -> None:
+        want = self.style == "visual" and self.window.get_visible() and self.bg_art != ""
+        if want != self.bg_window.get_visible():
+            self.bg_window.set_visible(want)
+
+    def _update_background(self) -> None:
+        art = ((self.state or {}).get("track") or {}).get("art") or ""
+        if art == self.bg_art:
+            return
+        self.bg_art = art
+        if not art:
+            self.bg.set_paintable(None)
+            return
+        try:
+            src = cairo.ImageSurface.create_from_png(art)
+        except (cairo.Error, OSError):
+            self.bg.set_paintable(None)
+            return
+        w, h = self.screen_w, self.screen_h
+        out = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+        cr = cairo.Context(out)
+        iw, ih = src.get_width(), src.get_height()
+        zoom = max(w / max(1, iw), h / max(1, ih))
+        cr.translate((w - iw * zoom) / 2, (h - ih * zoom) / 2)
+        cr.scale(zoom, zoom)
+        cr.set_source_surface(src, 0, 0)
+        cr.get_source().set_filter(cairo.FILTER_GOOD)
+        cr.paint()
+        cr.identity_matrix()
+        # dim + vignette baked in once, so frames never recompute a gradient
+        cr.set_source_rgba(0, 0, 0, 0.30)
+        cr.paint()
+        vignette = cairo.RadialGradient(w / 2, h / 2, h * 0.32, w / 2, h / 2, h * 0.95)
+        vignette.add_color_stop_rgba(0, 0, 0, 0, 0)
+        vignette.add_color_stop_rgba(1, 0, 0, 0, 0.62)
+        cr.set_source(vignette)
+        cr.paint()
+        out.flush()
+        data = GLib.Bytes.new(bytes(out.get_data()))
+        texture = Gdk.MemoryTexture.new(
+            w, h, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED, data, out.get_stride()
+        )
+        self.bg.set_paintable(texture)
+        self._sync_bg_window()
 
     def _claim_input_shape(self, window) -> None:
         surface = window.get_surface()
@@ -306,7 +405,10 @@ class Overlay:
             self._reload_look()
 
     def _reload_look(self) -> None:
-        new = effective(self.cfg, read_look(self.look_path))
+        self.look_cache = read_look(self.look_path)
+        self.word_cache.clear()  # colors may have changed even if nothing else did
+        self.area.queue_draw()
+        new = effective(self.cfg, self.look_cache)
         old = (self.style, self.font, self.size, self.color_override, self.show_next, self.motion)
         if new == old:
             return
@@ -424,9 +526,12 @@ class Overlay:
         if self.timeout_id:
             GLib.source_remove(self.timeout_id)
             self.timeout_id = 0
+        if self.style == "visual":
+            self._update_background()
         show_window = view.visible or self._card_active()
         if show_window != self.window.get_visible():
             self.window.set_visible(show_window)
+        self._sync_bg_window()
         if show_window and not view.visible:
             self.area.queue_draw()  # the card is state-driven, no timers
         if self.style == "line":
@@ -630,12 +735,15 @@ class Overlay:
             cr.paint_with_alpha(alpha)
         cr.restore()
 
-    def _word_surface(self, text: str, size: int, rgb, dim: bool, style: str = "bold"):
+    def _word_surface(
+        self, text: str, size: int, rgb, dim: bool, style: str = "bold", shear: float = 0.0
+    ):
         """A rendered word with baked shadow (and glow when bright).
 
         style: "bold" (our font), "serif" (italic serif) or "medium".
+        shear bakes a horizontal skew in, so frames can blit 1:1.
         """
-        key = (text, size, rgb, dim, style)
+        key = (text, size, rgb, dim, style, round(shear, 3))
         hit = self.word_cache.get(key)
         if hit is not None:
             return hit
@@ -652,11 +760,17 @@ class Overlay:
         layout.set_font_description(desc)
         layout.set_text(text, -1)
         _, logical = layout.get_pixel_extents()
-        w, h = logical.width + 16.0, logical.height + 16.0
+        lean = abs(shear) * logical.height
+        w, h = logical.width + 16.0 + lean, logical.height + 16.0
         surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(w * scale), int(h * scale))
         surface.set_device_scale(scale, scale)
         cr2 = cairo.Context(surface)
-        cr2.translate(8, 8)
+        cr2.translate(8 + (lean if shear < 0 else 0), 8)
+        if shear:
+            # skew about the text's vertical middle
+            mid = logical.height / 2
+            cr2.translate(-shear * mid, 0)
+            cr2.transform(cairo.Matrix(1, 0, shear, 1, 0, 0))
         cr2.save()
         cr2.translate(0, 2)
         PangoCairo.layout_path(cr2, layout)
@@ -707,84 +821,143 @@ class Overlay:
         return 0.35 + 0.65 * eased, 0.9 + 0.1 * eased
 
     # rolling column (stack and visual styles) --------------------------------
+    # Reference semantics (official hero video, 6 fps): three slots scroll up.
+    # bottom = the word being sung (visual: on a sweeping Highlight marker),
+    # middle = the word just sung, big; top = the word before, small.
+
+    SLOT_SCALE: ClassVar[dict] = {-1: 1.0, 0: 1.1, 1: 2.4, 2: 0.85, 3: 0.6}
+    SLOT_ALPHA: ClassVar[dict] = {-1: 0.6, 0: 1.0, 1: 1.0, 2: 0.62, 3: 0.0}
 
     @staticmethod
     def _word_style(line_key: str, index: int) -> str:
         return ("bold", "serif", "medium")[hash((line_key, index)) % 3]
 
     def _stagger(self, line_key: str, index: int, width: int) -> float:
-        return (hash((line_key, "x", index)) % 1000 / 1000 - 0.5) * width * 0.16
+        return (hash((line_key, "x", index)) % 1000 / 1000 - 0.5) * width * 0.05
 
-    def _column_rows(self, view: View, ix: int) -> list[tuple[int, str]]:
-        texts = [t for t, _ in view.words]
-        lo = max(0, ix - (COLUMN_ROWS - 1))
-        return [(i, texts[i]) for i in range(lo, ix + 1)]
+    def _trio(self) -> tuple[tuple, tuple, tuple]:
+        """(lyric, highlight, secondary) colors: look overrides, else album."""
+        look = self.look_cache
+        accent = self.accent_rgb
 
-    def _draw_column_word(self, cr, width, slot_y, line_key, i, text, role, now, extra_alpha=1.0):
-        size = int(self.size * (2.0, 1.44, 1.1)[role])
-        alpha = (1.0, 0.62, 0.38)[role] * extra_alpha
-        dim = role != 0
-        rgb = self.accent_rgb if role == 0 else (1, 1, 1)
-        surface, w, h = self._word_surface(text, size, rgb, dim, self._word_style(line_key, i))
-        cx = width / 2 + self._stagger(line_key, i, width)
-        if role == 0 and self.motion and (self.state or {}).get("status") == "playing":
-            cx += 2.5 * math.sin(now * 1.3 + i)
-        glyph = glyph_for(text) if self.style == "visual" else None
-        self._paint_word(cr, surface, w, h, cx, slot_y, alpha)
-        if glyph and role == 0:
-            gs, gw, gh = self._word_surface(glyph, max(14, size // 2), self.accent_rgb, True)
-            self._paint_word(cr, gs, gw, gh, cx - w / 2 - gw / 2 - 6, slot_y, 0.9 * extra_alpha)
-        return h
+        def mix(rgb, other, t):
+            return tuple(a * (1 - t) + b * t for a, b in zip(rgb, other))
+
+        lyric = (
+            _hex_rgb(look["lyric_color"]) if "lyric_color" in look else mix(accent, (1, 1, 1), 0.45)
+        )
+        highlight = _hex_rgb(look["highlight_color"]) if "highlight_color" in look else accent
+        secondary = (
+            _hex_rgb(look["secondary_color"])
+            if "secondary_color" in look
+            else mix(accent, (0.55, 0.55, 0.6), 0.55)
+        )
+        return lyric, highlight, secondary
+
+    def _column_base(self, height: int) -> float:
+        """Column font unit: ~8% of the screen height at the default size,
+        so the middle word lands near the reference's ~20% of the height."""
+        return getattr(self, "screen_h", height) * 0.08 * (self.size / 30.0)
+
+    def _slot_y(self, slot: float, cy: float, base: float) -> float:
+        # distance between slot centers from the two word heights involved
+        def half(s):
+            return self._lerp_slot(self.SLOT_SCALE, s) * base * 0.62
+
+        gap_down = (half(1) + half(0)) * 1.02
+        gap_up = (half(1) + half(2)) * 1.02
+        if slot <= 1:
+            return cy + (1 - slot) * gap_down
+        return cy - (slot - 1) * gap_up
+
+    @staticmethod
+    def _lerp_slot(table: dict, slot: float) -> float:
+        lo = math.floor(slot)
+        hi = lo + 1
+        t = slot - lo
+        return table.get(lo, 0.0) * (1 - t) + table.get(hi, 0.0) * t
 
     def _draw_rolling(self, cr, width, height, view: View) -> None:
         now = time.monotonic()
         ix = current_word_index(view)
         if ix < 0:
             return
-        rows = self._column_rows(view, ix)
+        texts = [t for t, _ in view.words]
+        fill = view.words[ix][1]
         slide = 1.0
         if now - self.slide_from < SLIDE_SECONDS:
             p = (now - self.slide_from) / SLIDE_SECONDS
             slide = 1 - (1 - p) ** 3
-        row_h = self.size * 2.1
-        base = height * 0.5 + (1 - slide) * row_h
-        exiting = None
-        if slide < 1.0 and ix - COLUMN_ROWS >= 0:
-            exiting = (ix - COLUMN_ROWS, [t for t, _ in view.words][ix - COLUMN_ROWS])
-        # ghost trails while the column slides
-        offsets = [(0.0, 1.0)]
-        if slide < 1.0 and self.motion:
-            # echo-depth ghosts (reference "Ship" look): 4 trailing copies
-            trail = row_h * (1 - slide) * 0.95
-            offsets = [
-                (trail * 1.00, 0.10),
-                (trail * 0.72, 0.17),
-                (trail * 0.46, 0.26),
-                (trail * 0.22, 0.38),
-                (0.0, 1.0),
-            ]
-        for ghost_dy, ghost_alpha in offsets:
-            if exiting is not None:
-                i, text = exiting
-                y = base - len(rows) * row_h
-                self._draw_column_word(
-                    cr,
-                    width,
-                    y + ghost_dy,
-                    view.line_key,
-                    i,
-                    text,
-                    2,
-                    now,
-                    (1 - slide) * ghost_alpha,
-                )
-            for pos, (i, text) in enumerate(rows):
-                role = len(rows) - 1 - pos
-                y = base - role * row_h
-                alpha = ghost_alpha if role == 0 or slide < 1.0 else 1.0
-                self._draw_column_word(
-                    cr, width, y + ghost_dy, view.line_key, i, text, min(role, 2), now, alpha
-                )
+        lyric, highlight, secondary = self._trio()
+        cy = height * 0.47
+        base = self._column_base(height)
+        visual = self.style == "visual"
+        alone = ix == 0  # first word of a line sits big in the middle
+        for i in range(max(0, ix - 3), ix + 1):
+            target = ix - i  # 0 current, 1 previous, 2 two back, 3 leaving
+            if alone:
+                target = 1
+            slot = target - 1 + slide if (not alone and slide < 1.0) else target
+            slot = max(-1.0, min(3.0, slot))
+            alpha = self._lerp_slot(self.SLOT_ALPHA, slot)
+            if alpha <= 0.01:
+                continue
+            scale_rel = self._lerp_slot(self.SLOT_SCALE, slot)
+            # raster at the TARGET slot's size with its tilt baked in: steady
+            # frames blit 1:1 (pixman fast path); only slides scale briefly
+            target_slot = max(0, min(2, target))
+            ref_size = max(12, int(base * self.SLOT_SCALE[target_slot]))
+            zoom = max(0.05, (base * scale_rel) / ref_size)
+            shear = -0.10 * (target_slot - 1)
+            current = i == ix
+            if current and visual:
+                rgb, dim = (1, 1, 1), False
+            elif current:
+                rgb, dim = highlight, False
+            elif slot >= 1.6:
+                rgb, dim = secondary, True
+            else:
+                rgb, dim = lyric, False
+            surface, w, h = self._word_surface(
+                texts[i], ref_size, rgb, dim, self._word_style(view.line_key, i), shear
+            )
+            cx = width / 2 + self._stagger(view.line_key, i, width)
+            y = self._slot_y(slot, cy, base)
+            if self.motion and (self.state or {}).get("status") == "playing" and current:
+                cx += 2.0 * math.sin(now * 1.3 + i)
+            cr.save()
+            steady = abs(zoom - 1.0) < 0.01
+            if steady:  # integer placement keeps the blit on the fast path
+                cx, y = round(cx - w / 2) + w / 2, round(y - h / 2) + h / 2
+            cr.translate(cx, y)
+            if not steady:
+                cr.scale(zoom, zoom)
+            if current and visual:
+                block = min(1.0, max(0.18, fill * 1.15))
+                pad_x, pad_y = 10, 4
+                bw = (w - 16 + 2 * pad_x) * block
+                bh = h - 16 + 2 * pad_y
+                cr.save()
+                cr.transform(cairo.Matrix(1, 0, -0.18, 1, 0, 0))
+                cr.rectangle(-(w - 16) / 2 - pad_x, -bh / 2 + 1, bw, bh)
+                cr.set_source_rgba(*highlight, 0.92 * alpha)
+                cr.fill()
+                cr.restore()
+            cr.set_source_surface(surface, -w / 2, -h / 2)
+            # bilinear, not cairo's default convolution: scaled+skewed big
+            # word bitmaps through FILTER_GOOD every frame cost most of a core
+            cr.get_source().set_filter(cairo.FILTER_BILINEAR)
+            cr.paint_with_alpha(alpha)
+            if visual and slot <= 1.4:
+                glyph = glyph_for(texts[i])
+                if glyph:
+                    gs, _gw, gh = self._word_surface(
+                        glyph, max(14, int(ref_size * 0.62)), highlight, False
+                    )
+                    cr.set_source_surface(gs, w / 2 - 4, -gh / 2)
+                    cr.get_source().set_filter(cairo.FILTER_BILINEAR)
+                    cr.paint_with_alpha(alpha)
+            cr.restore()
 
     # constellation ------------------------------------------------------------
 
@@ -982,12 +1155,8 @@ class Overlay:
         view = self.view
         if not view.visible:
             if self._card_active():
-                if self.style == "visual":
-                    self._visual_background(cr, width, height)
                 self._draw_card(cr, width, height)
             return
-        if self.style == "visual":
-            self._visual_background(cr, width, height)
         if self.style in ("stack", "visual"):
             self._draw_rolling(cr, width, height, view)
             self._draw_credit(cr, width, height)

@@ -23,6 +23,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
 from encorelib.config import EncoreConfig
+from encorelib.look import read_look
 from encorelib.palette import pick_accent
 from encorelib.stream import LineDecoder
 
@@ -118,6 +119,10 @@ class Glow:
         self.cfg = cfg
         self.accent = (1.0, 1.0, 1.0)
         self.accent2 = (1.0, 1.0, 1.0)
+        self.album_accent = (1.0, 1.0, 1.0)
+        self.album_accent2 = (1.0, 1.0, 1.0)
+        self.look_path = os.path.join(runtime_dir, "encore.look")
+        self.look: dict = {}
         self.status = "stopped"
         self.phase = 0.0
         self.last_tick = time.monotonic()
@@ -179,6 +184,7 @@ class Glow:
         self.monitor.connect("changed", self._on_dir_event)
         self.state_feed.try_connect()
         self.cava_feed.try_connect()
+        self._load_look()
         self._schedule()
 
     def _on_state_gone(self) -> None:
@@ -195,14 +201,41 @@ class Glow:
             self.state_feed.try_connect()
         elif name == "cava.sock":
             self.cava_feed.try_connect()
+        elif name == "encore.look":
+            self._load_look()
+
+    def _load_look(self) -> None:
+        """Glow settings from the player's popover, applied live."""
+        self.look = read_look(self.look_path)
+        self._resolve_colors()
+        self._queue()
+
+    def _resolve_colors(self) -> None:
+        look = self.look
+        if look.get("glow_override"):
+            primary = _hex_rgb(look.get("glow_primary", "#6B7CE8").lstrip("#"))
+            secondary = _hex_rgb(look.get("glow_secondary", "#C86BE8").lstrip("#"))
+        else:
+            primary, secondary = self.album_accent, self.album_accent2
+        self.accent = primary
+        self.accent2 = secondary if look.get("glow_colors", 2) == 2 else primary
+
+    @property
+    def thickness(self) -> int:
+        return self.look.get("glow_thickness", THICKNESS)
+
+    @property
+    def intensity(self) -> float:
+        return self.look.get("glow_intensity", 85) / 85.0
 
     def _on_state_line(self, line: bytes) -> None:
         for state in self.decoder.feed(line + b"\n"):
             self.status = state.get("status") or "stopped"
             palette = state.get("palette") or {}
-            self.accent = _hex_rgb(pick_accent(palette))
+            self.album_accent = _hex_rgb(pick_accent(palette))
             second = palette.get("3xa8") or palette.get("2xa8") or ""
-            self.accent2 = _hex_rgb(second) if second else _shift_hue(self.accent, 0.12)
+            self.album_accent2 = _hex_rgb(second) if second else _shift_hue(self.album_accent, 0.12)
+            self._resolve_colors()
         self._schedule()
 
     def _on_cava_line(self, line: bytes) -> None:
@@ -234,13 +267,18 @@ class Glow:
 
     def _alpha(self) -> float:
         if self.status == "playing":
-            return BASE_ALPHA + BEAT_ALPHA * self.envelope
-        return 0.18
+            alpha = BASE_ALPHA + BEAT_ALPHA * self.envelope
+        else:
+            alpha = 0.18
+        return min(1.0, alpha * self.intensity)
 
     def _tick(self) -> bool:
         now = time.monotonic()
         dt, self.last_tick = now - self.last_tick, now
-        if self.cava_feed.connection is None:
+        animation = self.look.get("glow_animation", "music")
+        if animation == "static":
+            self.envelope = 0.55
+        elif animation == "breathe" or self.cava_feed.connection is None:
             self.envelope = 0.5 + 0.5 * math.sin(now * 1.6)
         else:
             self.envelope *= RELEASE
@@ -261,7 +299,7 @@ class Glow:
     def _frame_texture(self, full_w: int, full_h: int) -> Gdk.Texture:
         small_w = max(1, -(-full_w // DOWNSCALE))
         small_h = max(1, -(-full_h // DOWNSCALE))
-        band = max(2, -(-THICKNESS // DOWNSCALE))
+        band = max(2, -(-self.thickness // DOWNSCALE))
         surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, small_w, small_h)
         cr = cairo.Context(surface)
         cr.set_operator(cairo.OPERATOR_ADD)  # overlapping corners glow brighter

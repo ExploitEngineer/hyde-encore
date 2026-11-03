@@ -30,7 +30,7 @@ class EncoreConfig:
     overlay_enable: bool = False
     overlay_position: str = "bottom"
     overlay_margin: int = 120
-    overlay_font: str = "JetBrainsMono Nerd Font"
+    overlay_font: str = "SF Pro Display, Inter, Cantarell, sans-serif"
     overlay_size: int = 30
     overlay_next_line: bool = True
     overlay_color: str = ""
@@ -139,7 +139,8 @@ def load_config(env: Mapping[str, str] | None = None, env_file: Path | None = No
             get("ENCORE_OVERLAY_POSITION"), ("top", "center", "bottom"), "bottom"
         ),
         overlay_margin=_as_int(get("ENCORE_OVERLAY_MARGIN"), 120),
-        overlay_font=_unquote(get("ENCORE_OVERLAY_FONT") or "") or "JetBrainsMono Nerd Font",
+        overlay_font=_unquote(get("ENCORE_OVERLAY_FONT") or "")
+        or "SF Pro Display, Inter, Cantarell, sans-serif",
         overlay_size=_as_int(get("ENCORE_OVERLAY_SIZE"), 30),
         overlay_next_line=_as_bool(get("ENCORE_OVERLAY_NEXT_LINE"), True),
         overlay_color=_unquote(get("ENCORE_OVERLAY_COLOR") or ""),

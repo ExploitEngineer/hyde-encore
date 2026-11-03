@@ -96,7 +96,7 @@ def test_overlay_defaults(tmp_path):
     assert cfg.overlay_enable is False
     assert cfg.overlay_position == "bottom"
     assert cfg.overlay_margin == 120
-    assert cfg.overlay_font == "JetBrainsMono Nerd Font"
+    assert cfg.overlay_font == "SF Pro Display, Inter, Cantarell, sans-serif"
     assert cfg.overlay_size == 30
     assert cfg.overlay_next_line is True
     assert cfg.overlay_color == ""
