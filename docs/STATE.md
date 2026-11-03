@@ -16,10 +16,13 @@
 - Real Spotify: follows Spotify over a stopped Brave tab; Spicy Lyrics word sync on "LEGACY (slowed down)" lights word by word in time.
 - `Encore` hyprlock preview on screen: real cover, title, artist, word-by-word line, readable colors.
 
+## Shipped (Plan 2, merged 2026-11-04, PR #3)
+- Lyrics overlay: GTK4 layer-shell, click-through, per-word feathered fill in the album accent, baked glow and shadow, dimmed next line, Spicy credit (first 10 s per track and while paused), slide-up cross-fade within a track, flock single-instance, `hyde-shell encore toggle`.
+- Measured: animating ~6% of one core at a 30 fps sweep, paused and hidden 0%; 171 tests.
+
 ## In progress
-- Branch `feat/encore-overlay` (Plan 2): lyrics overlay done, under final review. 167 tests.
-- Overlay measured: animating 6.5% of one core at a 30 fps sweep, paused and hidden 0%; see DECISIONS #10-#11.
 - Owner reference study (2026-11-04): 7 Verci/Lumn Instagram reels decoded to contact sheets; signature looks are bezel glow, constellation word-map, stacked mixed-font words, full-bleed album art. Drives Plans 3-5.
+- Owner live checks still open: click-through press on the overlay, pixel pass, SUPER+ALT+L bind.
 - Auto-lyrics (vocal separation + Whisper) spike parked: owner confirmed the target song has no lyrics anywhere; revisit later. Venv and recording live in `~/.cache/hyde/encore/autosync/`.
 
 ## Known gaps (deferred from review)
@@ -48,4 +51,4 @@
 - A `hyde-shell encore lrc` command to save the current lyrics as a local `.lrc` for offline use and hand-tuning.
 - Waybar module showing the current lyric line from `encore.sock`.
 
-verified: 61abec8 2026-11-04
+verified: 60c561c 2026-11-04
