@@ -27,3 +27,8 @@
 3. Glow with no cava socket: still breathes; cava appearing later gets picked up.
 4. Two styles' timers never run at once; paused/hidden = zero timers in every style.
 5. Stack with one-word lines and instrumental gaps.
+
+## Night extension (owner directive: full Verci parity and beyond)
+7. `encorelib/look.py`: runtime look overrides as JSON at `$XDG_RUNTIME_DIR/hyde/encore.look` — keys style, font, size, color, next_line; `read_look`, `update_look(path, **changes)` (merge + atomic write), validation per key, `effective(cfg, look) -> (style, font, size, color, next_line)`. Tests. `encore.style` file retired into it (style key), `encore style` CLI rewrites via update_look.
+8. Overlay: watch `encore.look`; rebuild caches on change (fonts/sizes/colors live). Now-playing card: when playing or paused but lyrics are null or unsynced, show centered rounded album art + title + artist instead of nothing (static, no timers).
+9. `encore.py`: `look` CLI (`font|size|color|style|next-line|reset`), `menu` CLI: rofi (HyDE pattern) with Style, Font (fc-list families), Size, Color (Auto/palette slots/custom hex), Glow toggle, Overlay toggle, Player pick (playerctl play to hand encore the player). Keybind SUPER+ALT+M. Review Focus: look file garbage never crashes; card never shows over real lyrics; cache rebuild on look change leaves no stale sizes.
