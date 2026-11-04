@@ -1,70 +1,59 @@
 # State
 
 Goal: match, then beat, Verci (lyrics) and Lumn (glow, player), polished enough to show publicly; upstream PRs to HyDE after.
-Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 glow, 5 player, 6 lock screen and HyDE integration, 7 review.
+Current shape: Encore is an app (DECISIONS #29); the next project is lyric animation polish on top of it.
 
-## Shipped (main, PRs #1-#12, plus branch layer3-visual)
-- Engine (`encorelib/`): LRC and enhanced LRC parser (syllable tags merge into words), CJK-aware word tokens, word-timing estimator calibrated on real word sync, gap-aware cursor, playback clock that keeps the rate across resyncs, config loader, providers (local `.lrc` always wins and is never cached, LRCLIB with junk-upload filter and up to three search variants for feat. credits, release qualifiers and browser "Artist - Title" videos, Spicy Lyrics syllable sync with a user key), versioned LRU lyrics cache (2000 tracks, errors never cached), album palette via `wallbash.sh`, JSON-lines protocol v1 (`lyrics.lines`, `line.text`, `gap` whenever no line is live).
-- Daemon (`encore daemon`): follows the most recently started MPRIS player or `[encore] players` (a same-song switch updates the player), follows the player's MPRIS `Rate`, bounded latest-wins lyric and palette workers with stale results discarded, publishes `encore.sock` plus hyprlock line, track and cover files.
-- Overlay (`encore toggle`, `encore style`): GTK4 layer-shell, click-through, pinned with its art layer to `overlay.monitor`; styles `line` (screen-scaled type, soft shadow, accent bloom, tinted next line), `stack` (rolling column, ghost trails, mixed fonts), `constellation` (centered word chain scaled to the screen, accent hairlines and sparkles), `visual` (art dimmed, accent-washed, pooled and vignetted under a column with glyphs and a Highlight block).
-- One album color scheme (`encorelib/colors.py`) for overlay, glow, player and lock screen: a vivid, readable tone of the cover's most colorful wallbash shade (chroma-ranked), else the HyDE theme's wallpaper palette, else a curated violet; block text by contrast.
-- Overlay frames are GPU render nodes (`encoregui/scene.py`): crisp mipmapped slides, GPU shadows; stack and visual columns exit on line change; per-word typefaces and zig-zag stable across restarts.
-- `hyde-shell encore lookups`: the last 50 lyric lookups (song, player, source or none), to explain missing lyrics.
-- Glow popover Display picker moves the glow live (`glow_monitor` look key).
-- Live look (`encore look`, runtime `encore.look`): style, font, size, Lyric Text / Highlight / Secondary colors, next line, motion.
-- Glow (`encore glow`, `[encore.glow] monitor`): one full-screen click-through window, 1/4-res texture scaled on the GPU, two comets circling over a soft light-like falloff (`encorelib/glowfield.py`), cava beat envelope or breathe fallback, 12.5 fps; look keys for gradient, animation, thickness, intensity, override colors. Before layer 3 every paint crashed (undefined helpers), so it never drew.
-- Player window (`encore menu`, SUPER+ALT+M): art with an album-tinted halo and hover-expand, transport, Lyrics pill with scrolling list, bottom toolbar, look menu, glow Settings popover; its accents follow the scheme.
-- Profiles `working` and `show` (`encore profile`); `encore show` toggles the empty `encore` workspace.
-- The overlay, glow and player start the daemon on demand when it is not answering (DECISIONS #20).
-- hyprlock `Encore.conf`: art, title, artist, word-highlighted line.
-- Upstream fragments: schema and config toml, `variables.encore.lua` (hc.start), `key_binds.encore.lua` (SUPER+ALT+{L,K,M,E}), `window_rules.encore.lua` (player floats).
-- 320 tests, ruff clean, including 20 end-to-end tests of the daemon on a private bus (`tests/e2e/harness.py`, marker `e2e`); `tests/e2e/fake_mpris.py` scriptable MPRIS player with a writable `Rate`; `tests/tools/calibrate_timing.py` scores the estimator against cached word sync.
-- `tests/e2e/stage.py`: renders the real overlay, glow and player on a hidden Hyprland monitor (`encore-lab`) and saves stills and clips; `measure.py --lab` measures them there.
+## Shipped (main through PR #17, plus branch feat/encore-app)
+- The Encore app (`org.hyde.encore`, launcher entry and icon, one window): Home (HD cover with hover halo, title, artist, seek bar, back 15 s / previous / play / next / forward 15 s, volume when the player has one, a chip to pick the player it follows), Lyrics page (synced lines, click a line to seek; "Looking for lyrics", "No synced lyrics found", plain lyrics as a list), Full screen (any style over the cover or clear black; top bar Exit / style / background / glow / look and bottom bar cover / song / seek / transport / volume fade in on mouse motion and out after 3 s; Esc, Exit and the compositor dropping fullscreen return to Home; the desktop overlay on that output hides meanwhile). Idle: drifting album-colored light with buttons for the music apps installed. Keys: Space, Left/Right, Up/Down, N/P, L, F, Esc, Ctrl+Q. Launching again raises the window; `encore app --open home|lyrics|full|look|settings`.
+- Closing the window keeps Encore in the tray (StatusNotifierItem: Open, Play/Pause, Next, Desktop lyrics, Glow, Quit) while desktop lyrics or glow run; otherwise it quits. Quit stops the overlay and glow; the engine stays for the lock screen.
+- Settings: glow (gradient, animation, thickness, glow, override colors, display), lock screen lyrics with Preview (`encore lock on|off|preview|status`, restores the previous hyprlock layout), HD covers, start at login, which players to follow, Quit. The look and these settings persist in `$XDG_STATE_HOME/hyde/encore.look` (DECISIONS #32).
+- HD covers (DECISIONS #30): Spotify's 1500 px CDN size always; Apple's catalog (2000 px) for other players with a strict artist and album (or song) match, on by default; `track.cover` beside the 512 px `track.art`.
+- Engine (`encorelib/`): LRC and enhanced LRC, CJK-aware word tokens, calibrated word-timing estimator, gap-aware cursor, playback clock, providers (local `.lrc`, LRCLIB with search variants, Spicy Lyrics word sync), LRU lyrics cache, album palette, protocol v1 with `players`, `volume`, `lookup` (pending or done) and `track.cover` added.
+- Daemon: follows the most recently started player or a pin (`encore follow <player|auto>`), honors the app's player list and HD switch live, publishes `encore.sock`, hyprlock line, track and cover files; `--if-enabled` honors the app's start-at-login switch and brings back desktop lyrics and glow that were on.
+- One lyric renderer (`encoregui/lyrics.py`, DECISIONS #31) for the desktop overlay (click-through, never a full-screen cover) and Full screen; styles line, stack, constellation, visual; frames are GPU render nodes.
+- One album color scheme for every surface; glow (one full-screen window, cava beat envelope); hyprlock `Encore.conf`.
+- 410 tests (unit and e2e on a private bus) plus 5 opt-in lab tests (`-m lab`) that drive the window on the hidden monitor; ruff clean. `tests/e2e/stage.py` renders every surface and app page on the hidden monitor; `measure.py` measures them.
 
-## Measured (this laptop, 2026-11-03/04)
-- Daemon (isolated harness, `tests/e2e/measure.py`, 10 s phases): playing 0.60%, paused 0 ticks, playing with no lyric line 0.40% of one core.
-- Overlay playing (hidden stage, `measure.py --lab --overlay`, dense test lyrics: a word every 0.3-0.5 s): line 7.6-9.1%, stack ~16%, constellation ~9%, visual ~19% of a core; paused and no lyric line under 1%. Pre-layer-3 code on the same content: line 5.9%, stack 15.4%, visual 18.9%.
-- Glow (hidden stage): playing 6.1-7.5%, paused 0.25% of a core.
-- Estimated word timing: mean word-start error 0.21 s against 11 real word-synced songs (was 0.43 s); see DECISIONS #19.
-- LRCLIB: feat. titles, browser video titles and empty-artist lookups that found nothing now return synced lyrics (live check 2026-11-04).
+## Measured (this laptop, 2026-11-04, hidden stage, `measure.py --lab`)
+- Window: playing 3%, paused 1.4%, idle 2-3% of a core (8 fps idle field); entering idle costs a one-off ~0.6 s of CPU (full-window crossfades).
+- Full screen playing: line 12%, stack 19%, constellation 4%, visual 24.5%; paused 0.5-1.6%. About 2-5 points over the overlay-only numbers: the whole window repaints per engine frame (the cover texture itself costs ~1 point).
+- Desktop overlay playing (dense lyrics): line 9-10%, stack 17%; paused and hidden under 1%. Daemon playing ~1%.
+- Glow playing 6-7.5%, paused 0.25%.
 
-## Verified with the owner (2026-11-04)
-- Real Spotify: follows Spotify over a stopped Brave tab; Spicy Lyrics word sync on "LEGACY (slowed down)" lights word by word in time.
-- `Encore` hyprlock preview: real cover, title, artist, word-by-word line, readable colors.
+## Verified with the owner
+- 2026-11-04 (before the app): real Spotify, Spicy Lyrics word sync, the `Encore` hyprlock preview.
 
 ## Unverified on screen
-- Player lyrics list with a real synced song, art hover-expand, glow following the Settings popover live.
-- Overlay click-through press test; every style checked on the hidden stage with test lyrics, not yet with a real song on the owner's screen.
-- Login autostart: the `hl.on("hyprland.start", ...)` hook from README sits in the owner's `~/.config/hypr/hyprland.lua` (2026-11-04); first proof is the next login.
+- The app end to end on the owner's screen: launcher, Spotify, full screen, close to tray, tray in waybar, lock switch. Every page is verified on the hidden monitor only.
+- Covers from Apple on a real browser track; HD Spotify covers in Home (lab used a 1500 px file).
 
 ## Broken or placebo
-- Player bottom bar: the display button cycles the style and the lock button previews hyprlock; neither matches the reference.
-- Polish, parity, setup and player branches shipped without an independent review.
-- Perf over the ~6.5% overlay budget on dense lyrics: stack ~17%, visual ~20%, constellation and line ~9-10% of a core; frames are GPU nodes now (DECISIONS #28), so the remaining cost is the per-frame pipeline; next cut needs a native profiler. Glow over the 5% design target.
+- Perf over budget while Full screen plays (above); the remaining cost is the per-frame pipeline (DECISIONS #28), which needs a native profiler.
+- GTK 4.24 logs harmless "GtkImage reported baselines" warnings when Settings opens (GtkDropDown internals).
 
 ## Not built
-- Multi-monitor: overlay and glow each pin to one output (`overlay.monitor`, `glow.monitor`); no per-monitor copies yet.
-- Grey covers already follow the HyDE theme's palette; a wallbash template for encore and the opt-in `follow_album` full-theme recolor are not built.
-- Glow autostart; only the overlay has an `enable` key.
+- Multi-monitor copies of the overlay and glow; a second monitor's Full screen hides only that output's overlay.
+- Wallbash template for encore and the opt-in `follow_album` full-theme recolor.
+- The standalone (non-HyDE) app; built so it stays possible.
 
 ## Next
-- Overlay perf: profile the per-frame pipeline natively (perf or sysprof, owner's OK to install) and cut what it shows (DECISIONS #28).
-- Motion timing against the official videos (clips via `stage.py --clip`), player bottom-bar behaviour, multi-monitor copies, lock screen, independent review.
+- Owner check on the real screen (plan Task 12), then lyric animation polish (timing against the official videos, emoji and glyphs beside words, lyric typefaces).
+- Per-frame pipeline cut with a native profiler (owner's OK to install perf or sysprof).
+- Upstream: Discussion, then small PRs (hyprlock.sh symlink and player fixes, start_up.lua hc.start iteration, encore).
 
 ## Known facts
-- HyDE bugs found (candidate small PRs): `hyprlock.sh find_filepath` uses `find -type f` without `-L`, so symlinked layouts fail to load and `Encore.conf` is installed as a copy; `hyprlock.sh fn_mpris` reads the first listed player, not the playing one.
-- HyDE's `start_up.lua` runs only the `hc.start` keys it names, so `[desktop.start]` entries for add-ons never start (candidate small PR: iterate `hc.start`).
-- Owner's Spicy Lyrics key lives in `~/.config/hyde/config.toml` (mode 600, not tracked by dotfiles).
-- HyDE writes `~/.local/state/hyde/config` only once config.toml holds a setting beyond `$schema`. Not a HyDE bug.
-- LRCLIB `/api/get` can return junk uploads (single `probe` line); synced results under 4 timed lines are rejected and search runs instead.
-- Auto-lyrics spike (vocal separation + Whisper) parked; venv and recording in `~/.cache/hyde/encore/autosync/`.
+- HyDE bugs found (candidate small PRs): `hyprlock.sh find_filepath` does not follow symlinked layouts; `hyprlock.sh fn_mpris` reads the first listed player; `start_up.lua` runs only the `hc.start` keys it names.
+- Hyprland 0.56 moves a workspace back to the monitor it was last on, so a reused headless monitor name pulls one of the owner's workspaces onto it; `stage.py` names its lab monitor per run and refuses to run if that happens. Its Lua `window.close` dispatcher accepted a selector without closing the window; the lab tests use the app's `close` GTK action instead.
+- PyGObject: `Gsk.RoundedRect().init_from_rect()` does not return the initialized struct (DECISIONS #34).
+- Owner's Spicy Lyrics key lives in `~/.config/hyde/config.toml` (mode 600, not tracked).
+- LRCLIB `/api/get` can return junk uploads; synced results under 4 timed lines are rejected and search runs instead.
 
 ## Open questions
 - Final name (working name: hyde-encore).
 
 ## Ideas
-- Re-survey LRCLIB `hasWordSync`; once word-synced entries are common, parse `lyricsfile` (DECISIONS #18).
-- `hyde-shell encore lrc` saves the current lyrics as a local `.lrc` for offline use and hand-tuning.
+- Push the state over the socket to the window instead of polling every 400 ms (paused window from 1.4% toward 0).
+- Full screen on a second monitor while Home stays on the first (a `--display` for Full screen).
 - Waybar module showing the current lyric line from `encore.sock`.
 
-verified: 29c486c 2026-11-04
+verified: 7320fc7 2026-11-04

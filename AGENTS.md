@@ -1,7 +1,7 @@
 # hyde-encore agent guide
 
 ## What this is
-HyDE add-on: word-synced lyrics overlay (four styles), beat-reactive edge glow, player window, hyprlock lyrics layout, all colored from the album art.
+HyDE add-on: the Encore app (Home, Lyrics, Full screen), word-synced lyrics on the desktop (four styles), beat-reactive edge glow, hyprlock lyrics layout, all colored from the album art.
 Goal: match, then beat, the reference apps Verci and Lumn, then upstream PRs to HyDE-Project/HyDE, so everything must look like HyDE wrote it.
 
 ## Hard rules
@@ -22,9 +22,9 @@ Goal: match, then beat, the reference apps Verci and Lumn, then upstream PRs to 
 - Tests: `python3 -m pytest -q`
 - Lint: `uvx ruff check Configs tests` and `uvx ruff format --check Configs tests`
 - Python runs on system `python3` (DECISIONS #8); `encorelib/` must not import `gi`.
-- E2E: `python3 -m pytest -q` includes `tests/e2e/` (marker `e2e`, about 15 s): the daemon against fake players on a private bus and runtime dir (`tests/e2e/harness.py`); `-m "not e2e"` for the fast loop. Never touch the owner's session for tests.
-- Visuals: `python3 tests/e2e/stage.py --style <line|stack|constellation|visual> [--glow] [--player lyrics] [--at 5.0,12.4]` renders the real surfaces on a hidden monitor and writes stills to `.stage/`; judge every visual change there, never on the owner's screen.
-- Perf: `python3 tests/e2e/measure.py --lab [--overlay --style S] [--glow]` on the isolated harness and hidden monitor; only its numbers back perf claims. Budget: overlay ~6.5% of one core animating, 0 paused/hidden.
+- E2E: `python3 -m pytest -q` includes `tests/e2e/` (marker `e2e`, about 20 s): the daemon against fake players on a private bus and runtime dir (`tests/e2e/harness.py`); `-m "not e2e"` for the fast loop. `python3 -m pytest -q -m lab tests/e2e/test_app.py` (opt-in) drives the window on the hidden monitor: launch, close to tray, Quit. Never touch the owner's session for tests.
+- Visuals: `python3 tests/e2e/stage.py --style <line|stack|constellation|visual> [--glow] [--app home|lyrics|full|settings|look] [--no-player|--no-lyrics|--stop-player] [--cover /abs.jpg] [--at 5.0,12.4]` renders the real surfaces on a hidden monitor and writes stills to `.stage/`; judge every visual change there, never on the owner's screen. The lab monitor gets a fresh name per run and aborts if it ever takes one of the owner's workspaces.
+- Perf: `python3 tests/e2e/measure.py --lab [--overlay --style S] [--glow] [--app home|full] [--look k=v]` on the isolated harness and hidden monitor; only its numbers back perf claims. Budget: overlay ~6.5% of one core animating, 0 paused/hidden; the window under 2% idle.
 - Never `pkill -f`/`pgrep -f` with a pattern that also appears in the same shell command; it matches and kills that shell. Anchor patterns (`^python3 ...$`) or run from a script file.
 
 ## Architecture
@@ -32,9 +32,10 @@ Goal: match, then beat, the reference apps Verci and Lumn, then upstream PRs to 
   Look: colors (album scheme), glowfield (glow geometry).
   Engine: model, lrc, words (CJK-aware tokens), timing, clock, providers, query (LRCLIB search variants), lookup, cache, palette, protocol, session, config, service (find or start the daemon).
   Daemon support: jobs (latest-wins workers), journal (lookup log).
-  View logic: look (runtime look file), profiles, stream (socket decoding, style list), lyricview, wordrects, constellation, glyphs, single (pidfile lock).
-- `Configs/.local/lib/hyde/encore.py`: GLib/Playerctl daemon and CLI; `encore.sh` is the hyde-shell entry (sets LD_PRELOAD for `overlay` and `glow`).
-- `Configs/.local/lib/hyde/encoregui/`: GTK4 processes, each separate from the daemon: `overlay.py` (layer-shell lyrics drawn as GPU render nodes through `scene.py`, plus the visual-style art layer), `glow.py` (one full-screen edge-glow window), `player.py` (normal app window `org.hyde.encore.player` with the look menu and glow popover).
-- Runtime dir `$XDG_RUNTIME_DIR/hyde/`: `encore.sock` (state), `encore.look` (live look and glow keys), pidfiles, hyprlock line, track and cover files.
+  View logic: look (live look file, persisted), profiles, stream (socket decoding, style list), lyricview, wordrects, constellation, glyphs, single (pidfile lock).
+  App logic: artwork (HD covers), transport (time, seek, volume, keys), coverfit (fill or frame a cover), screen (idle, waiting, no lyrics, plain, lyrics), lifecycle (close to tray or quit), lockscreen (hyprlock layout switch), dbusmenu (tray menu data).
+- `Configs/.local/lib/hyde/encore.py`: GLib/Playerctl daemon and CLI (`app`, `toggle`, `glow`, `style`, `look`, `follow`, `lock`, `profile`, `status`, `lookups`); `encore.sh` is the hyde-shell entry (sets LD_PRELOAD for `overlay` and `glow`).
+- `Configs/.local/lib/hyde/encoregui/`: GTK4, separate from the daemon. The app (`org.hyde.encore`, one process): `app.py` (unique application, window, actions, polling), `home.py` (Home and Lyrics pages), `fullscreen.py` (Full screen page, writes `encore.stage`), `popovers.py` (look menu, Settings), `cover.py` (GPU covers and the full-screen backdrop), `idle.py` (idle field), `tray.py` (StatusNotifierItem), `ui.py` (CSS, icons). The desktop surfaces (own processes): `lyrics.py` (LyricsEngine, the shared renderer, GPU nodes through `scene.py`), `overlay.py` (click-through layer-shell host, hides under Full screen), `glow.py` (one full-screen edge-glow window).
+- Runtime dir `$XDG_RUNTIME_DIR/hyde/`: `encore.sock` (state), `encore.look` (live look, glow and app keys; kept in `$XDG_STATE_HOME/hyde/encore.look`), `encore.follow` (pinned player), `encore.stage` (Full screen is up on this output), pidfiles, hyprlock line, track and cover files.
 - State protocol: JSON lines on `encore.sock`, schema in `docs/superpowers/plans/2026-11-03-encore-core.md`.
-- Upstream fragments hold only encore's additions, to merge into HyDE's files: `Configs/.local/share/hyde/schema/*.toml` and `Configs/.local/share/hypr/lua/{variables,start_up,key_binds,window_rules}.encore.lua`.
+- Upstream fragments hold only encore's additions, to merge into HyDE's files: `Configs/.local/share/hyde/schema/*.toml` and `Configs/.local/share/hypr/lua/{variables,start_up,key_binds,window_rules}.encore.lua`; the launcher entry and icon are `Configs/.local/share/applications/org.hyde.encore.desktop` and `icons/hicolor/scalable/apps/org.hyde.encore.svg`.

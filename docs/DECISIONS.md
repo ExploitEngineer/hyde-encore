@@ -7,7 +7,7 @@ Forking the external projects wholesale was rejected: mixed languages, not merge
 ## 2. 2026-11-03 - GPL-3.0 - Active
 Matches HyDE.
 
-## 3. 2026-11-03 - Lyrics overlay above windows, click-through - Active
+## 3. 2026-11-03 - Lyrics overlay above windows, click-through - Active (amended by #31: it never draws a full-screen cover)
 Overlay layer, no input region, keybind toggle. Visible while working, which is the video shot.
 
 ## 4. 2026-11-03 - Clean word-timing chain, no Musixmatch - Active
@@ -59,12 +59,12 @@ Kept from #13: own process toggled by `hyde-shell encore glow`, cava attack/rele
 ## 15. 2026-11-04 - Settings window and sound-setup profiles - Superseded by #16
 A GTK4 panel (`hyde-shell encore menu`, SUPER+ALT+M) modelled on the reference app replaces the rofi menu (kept as `menu --rofi`); profiles `working` and `show` set look keys and the glow state; `encore show` (SUPER+ALT+E) toggles an empty `encore` workspace running the show profile.
 
-## 16. 2026-11-04 - Three reference UIs, built separately - Active
+## 16. 2026-11-04 - Three reference UIs, built separately - Active (the `menu` window and the `show` workspace are superseded by #29)
 RE of the public reference assets showed three different UIs: the lyrics look menu, the player window, and the glow settings popover.
 `hyde-shell encore menu` (SUPER+ALT+M) now opens the player window; its palette button opens the look menu (styles, fonts, size, Lyric Text / Highlight / Secondary colors), its Settings pill opens the glow popover (gradient, animation, thickness, glow, override colors, display).
 Kept from #15: the `working` and `show` profiles and the `encore show` workspace; the rofi menu stays as `menu --rofi`.
 
-## 17. 2026-11-04 - Column styles render for steady 1:1 blits; visual art is its own layer - Active
+## 17. 2026-11-04 - Column styles render for steady 1:1 blits; visual art is its own layer - Superseded by #31
 Visual cost 85% of a core: words re-typeset at interpolated sizes every frame and big bitmaps went through cairo's convolution filter with skew.
 Words now rasterize per target slot with the drum tilt baked in, steady frames blit 1:1 at integer positions, slides use bilinear, and the album art sits in a separate TOP-layer window that never redraws: visual 11%, stack 9%.
 
@@ -122,4 +122,33 @@ Perf numbers need a quiet machine: with a browser video, Hyprland and a build ru
 Gains: big words scale with mipmapped filtering and only ever downward (crisp slides), and shadows are GPU blurs.
 An interleaved A/B on identical code and load (stack, dense lyrics, browser video running) measured cairo 17.5-20.0% against NGL 17.3-18.3% of a core, so the port is cost-neutral rather than the 4x the worst-case prototype suggested: painting is no longer the cost, and what remains is per-frame Python, GTK's frame cycle and the Wayland commit.
 Finding the next cut needs a native profiler (perf or sysprof), which is not installed.
+
+## 29. 2026-11-04 - Encore is a launcher app with one window: Home, Lyrics, Full screen - Active
+The owner could not use Encore as a user: everything started from keybinds and the visual style covered the screen with a click-through layer that had no way out.
+Encore is now `org.hyde.encore`, a unique `Gtk.Application` with a desktop entry and icon: launching it again raises the window, `encore app --open <page>` switches it.
+Home carries the cover, seek, transport, volume, the player chip and a bottom bar; Lyrics is a page; Full screen is the window itself fullscreened, with bars that fade in on mouse motion and Esc, an Exit button and the compositor dropping fullscreen all returning to Home.
+The `show` workspace, its profile and SUPER+ALT+E are retired; `player` and `menu` are aliases of `app`.
+Scope: HyDE on Hyprland (owner's call); standalone later.
+
+## 30. 2026-11-04 - HD covers: Spotify's CDN size, then Apple's catalog with a strict match - Active
+Spotify's MPRIS cover is the 640 px size (`ab67616d0000b273`) of an image the same CDN serves at 1500 px under `ab67616d000082c1`; that swap sends nothing new anywhere and is always on.
+Other players fall back to Apple's public iTunes Search API (2000 px artwork; 3000 px timed out on a slow link), on by default (owner's call) with a Settings switch, matched strictly: the primary artist must match and the album must, or the song title when the player sends no album (browser videos).
+A wrong cover is worse than a small one: no match means the player's own cover, shown sharp and framed, never stretched past 1.35x.
+The state carries `track.cover` (best full size) beside `track.art` (the 512 px lock copy); colors publish first and the HD download runs on its own worker.
+
+## 31. 2026-11-04 - One lyric renderer (LyricsEngine) hosted by the desktop overlay and the full-screen page - Active
+`encoregui/lyrics.py` owns the socket client, the live look and every style's drawing with no layer-shell import; `overlay.py` is a thin layer-shell host that hides while `encore.stage` names its output, and `fullscreen.py` hosts the same engine in the window over `CoverBackdrop`.
+The desktop never draws a full-screen cover again (the trap behind this project); the visual style on the desktop is the column alone.
+Pixel-compared before and after the split on the hidden stage: at most 0.03% of pixels differ, the run-to-run noise.
+
+## 32. 2026-11-04 - The look and the app's settings persist in $XDG_STATE_HOME/hyde/encore.look - Active
+Every look writer also keeps the merged look there and every entry point restores the runtime copy after a reboot; the daemon honors `autostart`, restarts desktop lyrics and glow that were on, and applies `players` and `hd_covers` live.
+
+## 33. 2026-11-04 - Close to tray through a StatusNotifierItem; Quit stops every surface - Active
+Closing the window with desktop lyrics or glow running keeps Encore in the tray (StatusNotifierItem and dbusmenu exported with plain Gio, registered whenever a watcher appears); with neither on, closing quits.
+Quit stops the overlay and glow and clears the full-screen flag; the daemon keeps running for the lock screen.
+The app also exposes `close` and `quit` as GTK app actions, which the lab tests drive over D-Bus (Hyprland's Lua `window.close` dispatcher accepted the call without closing the window).
+
+## 34. 2026-11-04 - Pre-existing fix: rounded clips and shadows were empty - Active
+PyGObject's return value of `Gsk.RoundedRect().init_from_rect()` is not the initialized struct, so every rounded clip built from it came out empty and every GPU shadow sat at the origin (pixman logged invalid rectangles). `scene.rounded()` builds the rect in place; `tests/test_scene.py` pins it.
 
