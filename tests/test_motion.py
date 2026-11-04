@@ -36,3 +36,11 @@ def test_grain_texture_is_fine_and_faint():
     assert max(alphas) <= 14  # never a bright speck
     assert grain_texture_bytes(128, seed=7) == data  # stable across runs
     assert grain_texture_bytes(128, seed=8) != data
+
+
+def test_held_scale_caps():
+    from encorelib.motion import held_scale
+
+    assert held_scale(0.1) == 1.0 and held_scale(0.3) == 1.0
+    assert abs(held_scale(0.75) - 1.09) < 0.01
+    assert held_scale(1.2) == 1.18 and held_scale(8.0) == 1.18

@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from .timing import GAP_HOLD_SECONDS
 
 GAP_HIDE_SECONDS = GAP_HOLD_SECONDS
+# words light a touch before their timestamp, as the ear expects (Verso leads by 160 ms)
+LEAD_SECONDS = 0.12
 FILL_FPS_HINT = 60
 
 
@@ -44,7 +46,7 @@ def _fill(position: float, start: float, end: float) -> float:
     return min(1.0, max(0.0, (position - start) / (end - start)))
 
 
-def build_view(state: dict | None, now: float) -> View:
+def build_view(state: dict | None, now: float, lead: float = LEAD_SECONDS) -> View:
     if not state or state.get("status") == "stopped":
         return HIDDEN
     lyrics, line, track = state.get("lyrics"), state.get("line"), state.get("track")
@@ -54,7 +56,7 @@ def build_view(state: dict | None, now: float) -> View:
     if not words:
         return HIDDEN
 
-    position = live_position(state, now)
+    position = live_position(state, now) + lead
     rate = state.get("rate", 1.0) or 1.0
     playing = state.get("status") == "playing"
 
@@ -122,13 +124,13 @@ def current_word_index(view: View) -> int:
     return index
 
 
-def next_word_boundary(state: dict | None, now: float) -> float | None:
+def next_word_boundary(state: dict | None, now: float, lead: float = LEAD_SECONDS) -> float | None:
     """Wall seconds until the next word start or end, while playing."""
     if not state or state.get("status") != "playing":
         return None
     line = state.get("line") or {}
     words = line.get("words") or []
-    position = live_position(state, now)
+    position = live_position(state, now) + lead
     rate = state.get("rate", 1.0) or 1.0
     # only word STARTS change what is on screen; ends inside a line do not,
     # except the LAST end, which starts the gap-hide countdown

@@ -64,7 +64,7 @@ def test_live_position_playing_and_paused():
 
 
 def test_fill_mid_word():
-    v = build_view(state(), 1000.0)  # live pos 10.5, inside word one
+    v = build_view(state(), 1000.0, lead=0.0)  # live pos 10.5, inside word one
     assert v.visible is True
     assert v.text == "one two"
     assert v.next_text == "next line text"
@@ -83,7 +83,7 @@ def test_sung_and_unsung_words():
 
 
 def test_paused_mid_word_is_frozen():
-    v = build_view(state(status="paused"), 1010.0)
+    v = build_view(state(status="paused"), 1010.0, lead=0.0)
     assert v.visible is True
     assert v.words[0][1] == pytest.approx(0.5)
     assert v.animating is False
@@ -91,17 +91,17 @@ def test_paused_mid_word_is_frozen():
 
 
 def test_wake_in_between_words():
-    v = build_view(state(position=11.5), 1000.0)
+    v = build_view(state(position=11.5), 1000.0, lead=0.0)
     assert v.wake_in == pytest.approx(0.5)
 
 
 def test_rate_two_halves_wake_in():
-    v = build_view(state(position=11.5, rate=2.0), 1000.0)
+    v = build_view(state(position=11.5, rate=2.0), 1000.0, lead=0.0)
     assert v.wake_in == pytest.approx(0.25)
 
 
 def test_visible_in_short_gap():
-    v = build_view(state(position=13.0 + GAP_HIDE_SECONDS - 0.1), 1000.0)
+    v = build_view(state(position=13.0 + GAP_HIDE_SECONDS - 0.1), 1000.0, lead=0.0)
     assert v.visible is True
     assert v.animating is False
     assert v.wake_in == pytest.approx(0.1)
@@ -164,12 +164,18 @@ def test_current_word_index():
 def test_next_word_boundary_mid_word_and_between():
     from encorelib.lyricview import next_word_boundary
 
-    assert next_word_boundary(state(), 1000.0) == pytest.approx(1.5)  # start of "two"
-    assert next_word_boundary(state(position=11.5), 1000.0) == pytest.approx(0.5)  # start of "two"
-    assert next_word_boundary(state(position=11.5, rate=2.0), 1000.0) == pytest.approx(0.25)
+    assert next_word_boundary(state(), 1000.0, lead=0.0) == pytest.approx(1.5)  # start of "two"
+    assert next_word_boundary(state(position=11.5), 1000.0, lead=0.0) == pytest.approx(
+        0.5
+    )  # start of "two"
+    assert next_word_boundary(state(position=11.5, rate=2.0), 1000.0, lead=0.0) == pytest.approx(
+        0.25
+    )
     # after the last word: wake at the gap-hide boundary (13.0 + GAP)
-    assert next_word_boundary(state(position=13.5), 1000.0) == pytest.approx(GAP_HIDE_SECONDS - 0.5)
-    assert next_word_boundary(state(position=13.0 + GAP_HIDE_SECONDS + 1), 1000.0) is None
+    assert next_word_boundary(state(position=13.5), 1000.0, lead=0.0) == pytest.approx(
+        GAP_HIDE_SECONDS - 0.5
+    )
+    assert next_word_boundary(state(position=13.0 + GAP_HIDE_SECONDS + 1), 1000.0, lead=0.0) is None
     assert next_word_boundary(state(status="paused"), 1000.0) is None
     assert next_word_boundary(None, 1000.0) is None
 
@@ -250,3 +256,33 @@ def test_word_styles_mix_and_stagger_stays_small():
 
     assert {word_style("line", i) for i in range(30)} == {"bold", "serif", "medium"}
     assert all(abs(stagger("line", i, 1000)) <= 25 for i in range(30))
+
+
+def test_lead_lights_words_a_touch_early():
+    from encorelib.lyricview import LEAD_SECONDS, build_view, current_word_index, next_word_boundary
+
+    assert 0.08 <= LEAD_SECONDS <= 0.16
+    state = {
+        "status": "playing",
+        "position": 9.9,
+        "ts": 100.0,
+        "rate": 1.0,
+        "track": {"key": "k"},
+        "lyrics": {"sync": "word"},
+        "line": {
+            "index": 0,
+            "start": 10.0,
+            "end": 14.0,
+            "text": "one two",
+            "words": [
+                {"text": "one", "start": 10.0, "end": 11.0},
+                {"text": "two", "start": 11.0, "end": 12.0},
+            ],
+        },
+    }
+    # 0.1 s before the word by the clock, but inside the lead: lit
+    assert current_word_index(build_view(state, now=100.0)) == 0
+    # the next boundary is the second word, measured with the same lead
+    assert abs(next_word_boundary(state, now=100.0) - (11.0 - 9.9 - LEAD_SECONDS)) < 1e-6
+    early = dict(state, position=9.7)
+    assert current_word_index(build_view(early, now=100.0)) == -1

@@ -28,7 +28,7 @@ from encoregui.lyrics import LineRaster
 from encoregui.scene import Image, Scene
 from encorelib.bytecache import ByteLRU
 from encorelib.depth import DEPTH, scroll_target, step, visible_range
-from encorelib.lyricview import live_position, lyric_row, next_word_boundary
+from encorelib.lyricview import LEAD_SECONDS, live_position, lyric_row, next_word_boundary
 from encorelib.motion import ease_out
 from encorelib.words import split_words
 
@@ -217,7 +217,7 @@ class LyricList(Gtk.Widget):
         """How bright each word of the current line is: 0 unsung, rising over WORD_FADE."""
         line = self.state.get("line") or {}
         words = line.get("words") or []
-        position = live_position(self.state, now)
+        position = live_position(self.state, now) + LEAD_SECONDS
         alphas = []
         for word in words:
             elapsed = position - float(word.get("start", 0.0))

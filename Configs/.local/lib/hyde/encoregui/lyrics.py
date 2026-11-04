@@ -26,7 +26,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gio, GLib, Gtk, Pango, PangoCairo
+gi.require_version("Graphene", "1.0")
+from gi.repository import Gio, GLib, Graphene, Gtk, Pango, PangoCairo
 
 from encoregui.scene import Image, Scene
 from encoregui.ui import trace
@@ -48,6 +49,7 @@ from encorelib.lyricview import (
     stagger,
     word_style,
 )
+from encorelib.motion import ease_out, held_scale
 from encorelib.palette import wallpaper_palette
 from encorelib.stream import LineDecoder, should_connect
 from encorelib.wordrects import word_byte_ranges
@@ -68,6 +70,20 @@ CONSTELLATION_SCALE = 1.2
 PAST_SCALE = 0.55
 RASTER_CACHE = 6
 WIDTH_FRACTION = 0.8
+GLYPH_POP_SECONDS = 0.15
+NEXT_LINE_BLUR = 1.5
+_SERIF_FACE: str | None = None
+
+
+def serif_face() -> str:
+    """The italic serif for column words: Instrument Serif when installed, else the system serif."""
+    global _SERIF_FACE
+    if _SERIF_FACE is None:
+        families = {f.get_name() for f in PangoCairo.FontMap.get_default().list_families()}
+        _SERIF_FACE = (
+            "Instrument Serif Italic" if "Instrument Serif" in families else "Serif Italic"
+        )
+    return _SERIF_FACE
 
 
 def _hex_rgb(color: str) -> tuple[float, float, float]:
@@ -679,6 +695,30 @@ class LyricsEngine:
         alpha = 0.25 + 0.45 * beat
         sc.image(raster.bright_img, (width - raster.width) / 2, (height - raster.height) / 2, alpha)
 
+    def _blurred_small(self, raster: LineRaster, radius: float):
+        """A small raster blurred once by the renderer; (texture, margin) or None."""
+        key = ("blur", id(raster), radius)
+        hit = self.word_cache.get(key)
+        if hit is not None:
+            return hit[0]
+        native = self.widget.get_native()
+        renderer = native.get_renderer() if native is not None else None
+        if renderer is None:
+            return None
+        margin = int(radius * 3)
+        w, h = raster.width + 2 * margin, raster.height + 2 * margin
+        snapshot = Gtk.Snapshot()
+        snapshot.push_blur(radius)
+        Scene(snapshot).image(raster.dim_img, margin, margin)
+        snapshot.pop()
+        node = snapshot.to_node()
+        if node is None:
+            return None
+        texture = renderer.render_texture(node, Graphene.Rect().init(0, 0, w, h))
+        value = (texture, float(margin))
+        self.word_cache.put(key, (value,), w * h * 4)
+        return value
+
     def _line_px(self) -> int:
         """Line type size: ~4% of the screen height at the default size 30."""
         return max(16, round(getattr(self, "screen_h", 1080) * 0.040 * self.size / 30))
@@ -761,7 +801,7 @@ class LyricsEngine:
         measure = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
         layout = PangoCairo.create_layout(cairo.Context(measure))
         if style == "serif":
-            desc = Pango.FontDescription.from_string("Serif Italic")
+            desc = Pango.FontDescription.from_string(serif_face())
         elif style == "medium":
             desc = Pango.FontDescription.from_string(self.font + " Medium")
         else:
@@ -924,6 +964,7 @@ class LyricsEngine:
         base = self._column_base(height)
         visual = self.style == "visual"
         alone = ix == 0  # first word of a line sits big in the middle
+        timings = ((self.state or {}).get("line") or {}).get("words") or []
         for i in range(max(0, ix - 3), ix + 1):
             target = ix - i  # 0 current, 1 previous, 2 two back, 3 leaving
             if alone:
@@ -934,6 +975,9 @@ class LyricsEngine:
             if alpha <= 0.01:
                 continue
             scale_rel = self._lerp_slot(self.SLOT_SCALE, slot)
+            if i < len(timings):  # a word held longer is set larger (Verso's rule)
+                held = float(timings[i].get("end", 0)) - float(timings[i].get("start", 0))
+                scale_rel *= held_scale(held)
             # raster at the largest size the word passes through on its way to
             # the target slot (tilt baked in): the GPU only ever scales down,
             # with mipmaps, so slides stay crisp instead of bloating up
@@ -972,10 +1016,17 @@ class LyricsEngine:
                 if visual and slot <= 1.4:
                     glyph = glyph_for(texts[i])
                     if glyph:
-                        gimg, _gw, gh = self._word_surface(
+                        gimg, gw, gh = self._word_surface(
                             glyph, max(14, int(ref_size * 0.62)), highlight, False
                         )
-                        sc.image(gimg, w / 2 - 4, -gh / 2, alpha)
+                        # the symbol pops in beside the word it belongs to
+                        pop = (
+                            1.0
+                            if not current
+                            else ease_out((now - self.fade_from) / GLYPH_POP_SECONDS)
+                        )
+                        with sc.group(w / 2 - 4 + gw / 2, 0, 0.6 + 0.4 * pop, alpha):
+                            sc.image(gimg, -gw / 2, -gh / 2)
 
     # constellation ------------------------------------------------------------
 
@@ -995,9 +1046,12 @@ class LyricsEngine:
         lyric, _highlight, secondary = self._trio()
         accent = self.accent_rgb
         # hairlines in the accent, brighter toward the newest word
+        pop = ease_out((now - self.fade_from) / 0.12)  # the newest hairline draws in
         for i in range(min(ix, len(positions) - 1)):
             age = ix - 1 - i
             (x1, y1), (x2, y2) = positions[i], positions[i + 1]
+            if age == 0 and pop < 1.0:
+                x2, y2 = x1 + (x2 - x1) * pop, y1 + (y2 - y1) * pop
             sc.line(x1, y1, x2, y2, 2.0, accent, max(0.16, 0.55 - 0.08 * age) * fade)
         spark, _sw, _sh = self._word_surface("✦", max(12, int(unit * 0.3)), accent, False)
         past = max(16, int(unit * 0.5))
@@ -1013,9 +1067,11 @@ class LyricsEngine:
             img, _w, _h = self._word_surface(texts[ix], int(unit), accent, False)
             alpha, zoom = self._pop(now)
             dx, dy = self._drift(now, ix, 1.6)
-            self._paint_word(
-                sc, img, positions[ix][0] + dx, positions[ix][1] + dy, alpha * fade, zoom
-            )
+            x, y = positions[ix][0] + dx, positions[ix][1] + dy
+            # the sparkle on the sung word breathes once a second
+            beat = 0.8 + 0.2 * math.sin(now * 2 * math.pi)
+            self._paint_word(sc, spark, x, y - unit * 0.62, 0.9 * beat * alpha * fade, 1.15)
+            self._paint_word(sc, img, x, y, alpha * fade, zoom)
 
     def _draw_constellation(self, sc: Scene, width, height, view: View) -> None:
         now = time.monotonic()
@@ -1163,7 +1219,15 @@ class LyricsEngine:
         y = base + raster.height
         if next_raster:
             y += 8
-            sc.image(next_raster.dim_img, 0, y, 0.72)
+            soft = self._blurred_small(next_raster, NEXT_LINE_BLUR)
+            if soft is not None:
+                texture, margin = soft
+                img = Image(
+                    texture, next_raster.width + 2 * margin, next_raster.height + 2 * margin
+                )
+                sc.image(img, -margin, y - margin, 0.72)
+            else:
+                sc.image(next_raster.dim_img, 0, y, 0.72)
             y += next_raster.height
         if credit_raster:
             y += 4
