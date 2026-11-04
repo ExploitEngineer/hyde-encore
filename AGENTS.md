@@ -23,11 +23,13 @@ Goal: match, then beat, the reference apps Verci and Lumn, then upstream PRs to 
 - Lint: `uvx ruff check Configs tests` and `uvx ruff format --check Configs tests`
 - Python runs on system `python3` (DECISIONS #8); `encorelib/` must not import `gi`.
 - E2E: `python3 -m pytest -q` includes `tests/e2e/` (marker `e2e`, about 15 s): the daemon against fake players on a private bus and runtime dir (`tests/e2e/harness.py`); `-m "not e2e"` for the fast loop. Never touch the owner's session for tests.
-- Perf: `python3 tests/e2e/measure.py [--overlay] [--glow]` on the isolated harness; only its numbers back perf claims. Budget: overlay ~6.5% of one core animating, 0 paused/hidden. `--overlay`/`--glow` draw on the real screen: ask the owner first.
+- Visuals: `python3 tests/e2e/stage.py --style <line|stack|constellation|visual> [--glow] [--player lyrics] [--at 5.0,12.4]` renders the real surfaces on a hidden monitor and writes stills to `.stage/`; judge every visual change there, never on the owner's screen.
+- Perf: `python3 tests/e2e/measure.py --lab [--overlay --style S] [--glow]` on the isolated harness and hidden monitor; only its numbers back perf claims. Budget: overlay ~6.5% of one core animating, 0 paused/hidden.
 - Never `pkill -f`/`pgrep -f` with a pattern that also appears in the same shell command; it matches and kills that shell. Anchor patterns (`^python3 ...$`) or run from a script file.
 
 ## Architecture
 - `Configs/.local/lib/hyde/encorelib/`: pure logic, unit-tested, no `gi`.
+  Look: colors (album scheme), glowfield (glow geometry).
   Engine: model, lrc, words (CJK-aware tokens), timing, clock, providers, query (LRCLIB search variants), lookup, cache, palette, protocol, session, config, service (find or start the daemon).
   Daemon support: jobs (latest-wins workers).
   View logic: look (runtime look file), profiles, stream (socket decoding, style list), lyricview, wordrects, constellation, glyphs, single (pidfile lock).
