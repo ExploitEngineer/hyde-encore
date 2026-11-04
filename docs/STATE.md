@@ -65,4 +65,4 @@ Current shape: Encore is an app (DECISIONS #29) with its own identity (#35); the
 - Waybar module showing the current lyric line from `encore.sock`.
 - The Lens style (the stack on a convex surface, no shaders) once a frame is cheap enough to afford it.
 
-verified: fd7948b 2026-11-05
+verified: 7f60851 2026-11-05
