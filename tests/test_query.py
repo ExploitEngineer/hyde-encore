@@ -50,3 +50,16 @@ def test_search_variants_dedupes_clean_tracks():
 
 def test_search_variants_empty_artist():
     assert search_variants("Numb", "") == [("Numb", "")]
+
+
+def test_dash_suffix_only_strips_when_qualifier_opens_it():
+    assert clean_title("Song - 2011 Remaster") == "Song"
+    assert clean_title("Song - Live at Wembley") == "Song"
+    assert clean_title("Alicia Keys - With You") != "Alicia Keys"  # a song, not a qualifier
+    assert clean_title("Queen - Love of My Life (Live)") == "Queen - Love of My Life"
+
+
+def test_search_variants_video_title_starting_with_qualifier_word():
+    variants = search_variants("Oasis - Live Forever (Official Video)", "OasisVEVO")
+    assert ("Live Forever", "Oasis") in variants
+    assert ("With You", "Alicia Keys") in search_variants("Alicia Keys - With You", "")

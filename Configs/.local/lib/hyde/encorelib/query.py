@@ -19,21 +19,33 @@ _QUALIFIER = (
     r"(?:feat\.?|ft\.?|featuring|with|official|video|audio|lyrics?|visuali[sz]er"
     r"|remaster(?:ed)?|live|explicit|clean|hd|hq|4k|radio edit|version)"
 )
-_WORD = r"(?<!\w)" + _QUALIFIER + r"(?!\w)"
-_BRACKETED = re.compile(r"\s*[\(\[][^\)\]]*" + _WORD + r"[^\)\]]*[\)\]]", re.IGNORECASE)
-_DASH_SUFFIX = re.compile(r"\s+[-–]\s+[^-–]*" + _WORD + r".*$", re.IGNORECASE)
+# A dash suffix is stripped only when a release qualifier opens it ("- Remastered
+# 2011", "- 2011 Remaster", "- Live at Wembley"). Featuring words are left out:
+# "Alicia Keys - With You" is an artist and a song.
+_DASH_QUALIFIER = (
+    r"(?:official|video|audio|lyrics?|visuali[sz]er|remaster(?:ed)?|live|explicit|clean"
+    r"|hd|hq|4k|radio edit|version)"
+)
+_DASH = r"\s+[-\N{EN DASH}]\s+"
+_BRACKETED = re.compile(
+    r"\s*[\(\[][^\)\]]*(?<!\w)" + _QUALIFIER + r"(?!\w)[^\)\]]*[\)\]]", re.IGNORECASE
+)
+_DASH_SUFFIX = re.compile(_DASH + r"(?:\d{4}\s+)?" + _DASH_QUALIFIER + r"(?!\w).*$", re.IGNORECASE)
 _BARE_FEAT = re.compile(r"\s+(?:feat\.?|ft\.?|featuring)\s.*$", re.IGNORECASE)
 _ARTIST_SPLIT = re.compile(
     r"\s*(?:,|;|\s&\s|\sx\s|\sfeat\.?\s|\sft\.?\s|\sfeaturing\s|\swith\s)\s*", re.IGNORECASE
 )
 _TOPIC = re.compile(r"\s+-\s+Topic$", re.IGNORECASE)
-_ARTIST_TITLE = re.compile(r"^(.+?)\s+[-–]\s+(.+)$")
+_ARTIST_TITLE = re.compile(r"^(.+?)" + _DASH + r"(.+)$")
+
+
+def _strip_brackets(title: str) -> str:
+    return " ".join(_BRACKETED.sub("", title).split())
 
 
 def clean_title(title: str) -> str:
     """The title without featuring credits and release qualifiers."""
-    cleaned = _BRACKETED.sub("", title)
-    cleaned = _DASH_SUFFIX.sub("", cleaned)
+    cleaned = _DASH_SUFFIX.sub("", _strip_brackets(title))
     cleaned = _BARE_FEAT.sub("", cleaned)
     cleaned = " ".join(cleaned.split())
     return cleaned or title.strip()
@@ -56,7 +68,8 @@ def search_variants(title: str, artist: str) -> list[tuple[str, str]]:
 
     add(title, artist)
     add(clean_title(title), primary_artist(artist))
-    split = _ARTIST_TITLE.match(clean_title(title))
+    # split before the dash-suffix strip: "Oasis - Live Forever" is a song
+    split = _ARTIST_TITLE.match(_strip_brackets(title))
     if split:
         add(clean_title(split.group(2)), primary_artist(split.group(1)))
     return variants[:MAX_SEARCHES]
