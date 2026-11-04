@@ -57,6 +57,9 @@ class CoverView(Gtk.Widget):
         self.tick_id = 0
         self.alpha = 1.0
         self._apply_size()
+        # a tick callback keeps the window's frame clock running at the monitor
+        # rate; a hidden cover (the other page) must never hold one
+        self.connect("unmap", lambda *_: self._stop_fade())
 
     def _apply_size(self) -> None:
         total = self.side + 2 * self.PAD
@@ -88,9 +91,18 @@ class CoverView(Gtk.Widget):
             return  # a newer cover was asked for meanwhile
         self.previous, self.texture = self.texture, texture
         self.fade_from = time.monotonic()
-        if self.previous is not None and not self.tick_id:
-            self.tick_id = self.add_tick_callback(self._tick)
+        if self.previous is not None and self.get_mapped():
+            if not self.tick_id:
+                self.tick_id = self.add_tick_callback(self._tick)
+        else:
+            self.previous = None  # unseen: no crossfade to show
         self.queue_draw()
+
+    def _stop_fade(self) -> None:
+        if self.tick_id:
+            self.remove_tick_callback(self.tick_id)
+            self.tick_id = 0
+        self.previous = None
 
     def _tick(self, _widget, _clock) -> bool:
         self.queue_draw()

@@ -59,6 +59,22 @@ scale highlight { background: #6b7ce8; border-radius: 4px; }
 scale slider { background: #9a9aa2; min-width: 18px; min-height: 18px; border-radius: 9px; }
 switch { background: rgba(255,255,255,0.16); }
 switch:checked { background: #6b7ce8; }
+.time { font-family: "SF Pro Display"; font-size: 11px; color: #8e8d94; font-feature-settings: "tnum"; }
+scale.seek trough, scale.volume trough { min-height: 4px; }
+scale.seek slider, scale.volume slider { min-width: 12px; min-height: 12px; margin: -4px; border-radius: 6px;
+                                         background: #ececf0; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
+scale.seek highlight { background: #ececf0; }
+.dim-icon { color: #8e8d94; }
+menubutton.chip > button { border-radius: 999px; padding: 4px 12px; min-height: 0;
+                           background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
+                           box-shadow: none; color: #b8b7bf; font-family: "SF Pro Display"; font-size: 12px; }
+menubutton.chip > button:hover { background: rgba(255,255,255,0.12); }
+.status { font-family: "SF Pro Display"; font-size: 12px; color: #8e8d94; }
+.idle-title { font-family: "SF Pro Display"; font-size: 30px; font-weight: 800; color: #f4f4f7; }
+.lyric.message { color: rgba(236,236,240,0.55); font-size: 18px; font-weight: 600; }
+.lyric.seekable:hover { color: rgba(236,236,240,0.75); }
+.lyric.seekable.current:hover { color: #f4f4f7; }
+button.round.on { border-color: rgba(255,255,255,0.18); }
 """
 
 

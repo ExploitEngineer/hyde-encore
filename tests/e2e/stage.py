@@ -130,7 +130,7 @@ def launch_app(h: Harness, page: str, log: str = "app.log") -> subprocess.Popen:
     return h._spawn([sys.executable, str(LIB / "encore.py"), "app", "--open", page], log)
 
 
-def open_app(h: Harness, lab: Lab, page: str) -> tuple[int, int, int, int]:
+def open_app(h: Harness, lab: Lab, page: str) -> tuple[tuple[int, int, int, int], subprocess.Popen]:
     """Open the Encore window on the lab monitor; abort at once if it maps anywhere else."""
     monitor = lab.monitor()
     print(
@@ -140,7 +140,7 @@ def open_app(h: Harness, lab: Lab, page: str) -> tuple[int, int, int, int]:
             'hl.window_rule({name = "encore_lab_player", '
             'match = {class = "^org\\\\.hyde\\\\.encore\\\\.lab$"}, '
             f'workspace = "{monitor["activeWorkspace"]["id"]} silent", '
-            'float = true, center = true, size = "960 660", '
+            'float = true, center = true, size = "960 700", '
             'opacity = "1.0 override 1.0 override"})',
         ),
     )
@@ -156,7 +156,7 @@ def open_app(h: Harness, lab: Lab, page: str) -> tuple[int, int, int, int]:
     time.sleep(1.5)  # art, fonts and the first poll
     client = _lab_client() or client
     (ax, ay), (aw, ah) = client["at"], client["size"]
-    return ax - monitor["x"], ay - monitor["y"], aw, ah
+    return (ax - monitor["x"], ay - monitor["y"], aw, ah), process
 
 
 def look_value(raw: str):
@@ -181,6 +181,10 @@ def main() -> int:
         "--relaunch", action="store_true", help="launch Encore a second time: one window must stay"
     )
     parser.add_argument("--cover", default="", help="cover image (default: newest cached)")
+    parser.add_argument("--no-player", action="store_true", help="no music player: the idle screen")
+    parser.add_argument("--no-lyrics", action="store_true", help="no lyrics for the song")
+    parser.add_argument("--title", default="", help="the fake song's title")
+    parser.add_argument("--artist", default="", help="the fake song's artist")
     parser.add_argument("--ref", default="", help="reference frame for a side-by-side sheet")
     parser.add_argument("--out", default="", help="output dir (default .stage/<style>)")
     args = parser.parse_args()
@@ -191,13 +195,28 @@ def main() -> int:
         # GTK_A11Y=none: the private bus cannot activate the accessibility registry,
         # which makes GtkApplication registration fail and the surface exit
         h.env.update(ENCORE_OVERLAY_MONITOR=LAB, ENCORE_GLOW_MONITOR=LAB, GTK_A11Y="none")
-        h.write_lrc(ARTIST, TITLE, LRC)
+        if not args.no_lyrics:
+            h.write_lrc(args.artist or ARTIST, args.title or TITLE, LRC)
         cover = Path(args.cover) if args.cover else default_cover(Path(tmp))
-        h.start_player(art=str(cover))
-        h.start_daemon()
-        h.ctl("encoretest", "play")
-        h.wait(lambda s: s["status"] == "playing" and s["lyrics"] and s["track"]["art"], 15)
-        h.ctl("encoretest", "pause")
+        if args.no_player:
+            h.start_daemon()
+            h.wait_until(lambda: h.state() is not None, "the daemon", 15)
+        else:
+            extra = [f"--title={args.title}"] if args.title else []
+            extra += [f"--artist={args.artist}"] if args.artist else []
+            h.start_player("encoretest", str(cover), *extra)
+            h.start_daemon()
+            h.ctl("encoretest", "play")
+            h.wait(
+                lambda s: (
+                    s["status"] == "playing"
+                    and (args.no_lyrics or s["lyrics"])
+                    and s.get("lookup") == "done"
+                    and s["track"]["art"]
+                ),
+                15,
+            )
+            h.ctl("encoretest", "pause")
         look = {"style": args.style}
         for item in args.look:
             key, _, value = item.partition("=")
@@ -209,7 +228,7 @@ def main() -> int:
             h._spawn(["bash", str(LIB / "encore.sh"), "glow", "--run"], "glow.log")
         player_box = None
         if args.app:
-            player_box = open_app(h, lab, args.app)
+            player_box, _app = open_app(h, lab, args.app)
             if args.relaunch:
                 second = launch_app(h, args.app, "app-second.log")
                 code = second.wait(10)
@@ -234,8 +253,9 @@ def main() -> int:
 
         shots = []
         for at in [float(x) for x in args.at.split(",") if x]:
-            h.ctl("encoretest", "position", str(at))
-            h.wait(lambda s, at=at: abs(s["position"] - at) < 0.05)
+            if not args.no_player:
+                h.ctl("encoretest", "position", str(at))
+                h.wait(lambda s, at=at: abs(s["position"] - at) < 0.05)
             time.sleep(0.8)  # the overlay finishes its transition
             shots.append(lab.capture(out / f"{args.style}-{at:05.1f}.png"))
             print(shots[-1])

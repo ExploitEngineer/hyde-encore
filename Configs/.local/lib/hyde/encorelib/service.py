@@ -8,9 +8,10 @@ or a second click finds it already running.
 
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 CONNECT_TIMEOUT = 0.5
@@ -55,6 +56,7 @@ def ensure_daemon(
     desktop: str,
     run: Callable = subprocess.run,
     fallback: Callable[[], None] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> str:
     """Start the daemon unless one is answering; returns running, started or fallback.
 
@@ -64,6 +66,12 @@ def ensure_daemon(
     """
     if daemon_alive(socket_path):
         return "running"
+    env = os.environ if env is None else env
+    if env.get("ENCORE_NO_UNIT"):
+        # the test harness: never start or reset the owner's real unit
+        if fallback is not None:
+            fallback()
+        return "fallback"
     # HyDE's app2unit starts units with --same-dir; a working directory that
     # later disappears makes every restart fail, so always start from home
     quiet = {

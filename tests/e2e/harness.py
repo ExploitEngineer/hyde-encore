@@ -117,6 +117,7 @@ class Harness:
             ENCORE_LYRICS_DIRS=str(self.tmp / "lyrics"),
             ENCORE_LYRICS_LRCLIB="false",  # tests never reach the network
             ENCORE_HD_COVERS="false",  # no Apple lookups either
+            ENCORE_NO_UNIT="1",  # a restart never starts the owner's real encore unit
             ENCORE_LYRICS_SPICY_KEY="",
             SPICY_LYRICS_SECRET_KEY="",
         )

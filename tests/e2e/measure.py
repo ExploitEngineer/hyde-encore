@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from harness import LIB, Harness, write_png
-from stage import LAB, Lab
+from stage import LAB, Lab, open_app
 
 from encorelib.look import update_look
 
@@ -59,6 +59,7 @@ def main() -> int:
     parser.add_argument(
         "--lab", action="store_true", help="run GUI surfaces on the hidden stage monitor"
     )
+    parser.add_argument("--app", default="", help="also measure the Encore window on this page")
     args = parser.parse_args()
 
     lab = Lab() if args.lab else contextlib.nullcontext()
@@ -78,6 +79,11 @@ def main() -> int:
             pids["overlay"] = h._spawn(["bash", str(LIB / "encore.sh"), "overlay"], "ov.log").pid
         if args.glow:
             pids["glow"] = h._spawn(["bash", str(LIB / "encore.sh"), "glow", "--run"], "gl.log").pid
+        if args.app:
+            if not args.lab:
+                parser.error("--app needs --lab: the window must never open on the owner's screen")
+            _box, app = open_app(h, lab, args.app)
+            pids["app"] = app.pid
         time.sleep(2.0)  # let every process settle before counting
 
         phase("playing", pids, args.seconds)
@@ -88,6 +94,13 @@ def main() -> int:
         h.ctl("encoretest", "play")
         h.wait(lambda s: s["status"] == "playing" and s["line"] is None)
         phase("no lyric line", pids, args.seconds)
+        if args.app:
+            h.ctl("encoretest", "stop")
+            h.wait(lambda s: s["status"] == "stopped")
+            # entering idle crossfades the whole window for 0.6 s (a one-off
+            # burst of about 0.6 s of CPU); the number that matters is after
+            time.sleep(2.0)
+            phase("idle", pids, args.seconds)  # the window's idle field animates
         print(f"private runtime dir: {h.run}")
     print("harness torn down; the owner's runtime dir was never used")
     return 0
