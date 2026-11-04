@@ -174,3 +174,10 @@ def test_lead_lights_words_early():
 - [ ] `python3 -m pytest -q`, `-m lab`, ruff; `measure.py` for home, lyrics, full (4 styles), overlay (line, stack); stills sheet of every screen under `.stage/finish-final/`.
 - [ ] STATE.md rewritten (shipped, measured), DECISIONS #35 (the identity: album field, glass, depth) and #36 (lead and held-word scale), AGENTS.md module map, PR #18 description updated.
 - [ ] Commit `docs: record the finish`, push.
+
+## Handoff (2026-11-05, session ended on context)
+- Done and committed on `feat/encore-app` (PR #18): Task 1 (album field, identity, 1d6cf3e), Task 2 (lyrics list with depth, 8ee0c1f), Task 3 (glass bars, hero entry, shared textures, a79be9d), Task 4 (lyric motion, lead, serif, fd7948b). Task 5 (Lens) skipped by ruling. Task 6 needed no code (popovers already restyled in Task 1; stills in `.stage/finish-6`).
+- Remaining, Task 7: DECISIONS #35 (identity: album field, glass, lyric depth; Instrument Serif) and #36 (frames are the cost: 8-16 ms per full-window repaint on this NVIDIA GL/Vulkan; no per-frame blur or mask nodes; cached blurs; per-word brighten; hero cut instead of crossfade; warm-up; numbers below); AGENTS.md module map (`field.py`, `lyriclist.py`, `glass.py`, `motion.py`, `depth.py`, `ENCORE_TRACE`, stage `--then`, `--long-lyrics`); STATE.md rewrite; update PR #18 text; push.
+- Measured (8 s lab runs): Home playing 2%, paused 1.75%, idle 1.25%; Lyrics page 13% while words fill; full screen line 8.5%, stack 15-22%, constellation 6.6%, visual 15-20%, paused 0.75-1.6%; overlay line 7.75%, stack 14.1%. First full-screen frame ~250 ms once per session.
+- Owner must know: `/run/user/1000` (1.6 GB tmpfs) was 100% full of ~130 `checkupdates_db_*` dirs left by HyDE's waybar update checker; the test harness now falls back to /tmp; the dirs were not touched.
+- Verified only on the hidden monitor; the owner's run on the real screen is still pending.
