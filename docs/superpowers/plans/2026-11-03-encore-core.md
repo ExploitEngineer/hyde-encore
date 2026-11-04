@@ -68,7 +68,7 @@ Socket protocol (consumed by Plans 2 and 3, fixed here): one JSON object per lin
 ```json
 {"v": 1, "ts": 12345.678, "status": "playing", "player": "spotify",
  "track": {"key": "...", "title": "...", "artist": "...", "album": "...", "length": 215.3, "art": "/path/cover.png"},
- "lyrics": {"sync": "word", "source": "lrclib", "credit": null},
+ "lyrics": {"sync": "word", "source": "lrclib", "credit": null, "lines": [{"start": 61.9, "text": "hello world"}]},
  "position": 63.21, "rate": 1.0,
  "line": {"index": 12, "start": 61.9, "end": 65.4, "words": [{"text": "hello", "start": 61.9, "end": 62.3}]},
  "next": "text of next line",

@@ -65,8 +65,8 @@ description = "Pixels between the overlay and the anchored screen edge."
 type = "integer"
 
 [properties.encore.properties.overlay.properties.font]
-default = "JetBrainsMono Nerd Font"
-description = "Overlay font family."
+default = "SF Pro Display, Inter, Cantarell, sans-serif"
+description = "Overlay font families, first installed one wins."
 type = "string"
 
 [properties.encore.properties.overlay.properties.size]

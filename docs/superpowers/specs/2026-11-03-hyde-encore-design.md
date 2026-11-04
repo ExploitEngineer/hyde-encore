@@ -1,7 +1,8 @@
 # hyde-encore design
 
 Date: 2026-11-03.
-Status: draft, builder-reviewed, awaiting owner approval.
+Status: original design, built through Plans 1-3 and later branches.
+Where it differs, `docs/DECISIONS.md` wins: the player window and look menu replace the no-settings-GUI non-goal (#15, #16), the glow runs in its own process (#13, #14), and there are four overlay styles (#12, #17).
 Working name: hyde-encore (final name still open, rename is cheap).
 
 ## Intent

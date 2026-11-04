@@ -1,44 +1,52 @@
 # hyde-encore
 
-Music-reactive ambience for [HyDE](https://github.com/HyDE-Project/HyDE): word-by-word synced lyrics, a beat-reactive screen-edge glow, and album-art driven wallbash colors, plus a lyrics layout for hyprlock.
+Music-reactive ambience for [HyDE](https://github.com/HyDE-Project/HyDE): word-by-word synced lyrics over your desktop, a beat-reactive screen-edge glow, a player window, and a lyrics lock screen, all colored from the album art.
 
 The tree under `Configs/` mirrors HyDE's own layout so the work can be proposed upstream as pull requests.
 
 ## Status
 
-Plans 1 and 2 are done: the `encore` service, the lyrics engine, the `Encore` hyprlock layout, and the lyrics overlay.
-Next: more overlay styles (constellation, stack), the beat-reactive edge glow, and the full-theme recolor.
-See `docs/STATE.md`.
+Everything below is in `main`.
+A layer-by-layer quality pass is under way (engine, daemon, overlay, glow, player, lock screen); see `docs/STATE.md` for what is verified, what is still rough and what comes next.
 
 ## What works today
 
 - `hyde-shell encore daemon` follows the most recently started MPRIS player (Spotify, browsers, anything with MPRIS).
 - Lyrics come from local `.lrc` files, then [LRCLIB](https://lrclib.net), then the [Spicy Lyrics API](https://developers.spicylyrics.org) for word-level sync on Spotify when you add a key.
   Lines without word timing get estimated word timing.
-- The album cover is run through HyDE's `wallbash.sh` to get a palette for the lyric highlight.
+- The album cover is run through HyDE's `wallbash.sh` to get the palette for lyrics, glow and lock screen.
+- `hyde-shell encore toggle` floats the lyrics above your windows, click-through, in one of four styles:
+  - `line`: the current line with a feathered word-by-word fill, the next line dimmed below.
+  - `stack`: a rolling column of the last sung words in mixed fonts, with ghost trails as it scrolls.
+  - `constellation`: the line grows as a chain of words joined by hairlines, then fades as one cluster.
+  - `visual`: the album art fills the screen under the rolling column, the sung word sits on a Highlight marker, some words get a glyph.
+- `hyde-shell encore style next` cycles the styles; `hyde-shell encore look font|size|color|next-line|motion|reset` changes the look live.
+- `hyde-shell encore glow` toggles a screen-edge glow in the album colors: two comets circle the frame and speed up on the beat when HyDE's cava is running, and it breathes softly without it.
+- `hyde-shell encore menu` opens the player window: album art, transport controls, a Lyrics view with the whole song scrolling, a look menu (style, font, size, lyric colors) and a Settings popover for the glow (gradient, animation, thickness, glow, override colors).
+- `hyde-shell encore profile working|show` applies a sound setup; `hyde-shell encore show` toggles an empty `encore` workspace running the full show.
 - `hyde-shell encore status` prints the live state as JSON; the same JSON lines stream on `$XDG_RUNTIME_DIR/hyde/encore.sock`.
 - The `Encore` hyprlock layout shows the album art, title, artist and the lyric line with sung words highlighted.
-- `hyde-shell encore style next` cycles the overlay through three styles: `line` (karaoke strip), `stack` (huge centered words between dim serif neighbors) and `constellation` (the line scattered across the screen as a glowing word map with hairlines and sparkles).
-- `hyde-shell encore glow` toggles a screen-edge glow in the album color that pulses with the beat when HyDE's cava is running, and breathes softly without it.
-- `hyde-shell encore toggle` floats the current line above your windows: click-through, word-by-word feathered fill in the album accent, a baked glow and shadow, the next line dimmed below, and a slide-up cross-fade between lines.
-  It hides itself during instrumental gaps and reconnects if the service restarts.
-  Suggested bind: `hl.bind(MOD .. " + ALT + L", hl.dsp.exec_cmd("hyde-shell encore toggle"), {description = "[Utilities] toggle encore lyrics overlay"})` in `~/.config/hypr/hyprland.lua`.
 
 ## Try it from this checkout
 
-Requirements: HyDE, `python-gobject`, `playerctl`, `imagemagick` (all present on a HyDE install).
+Requirements: HyDE, `python-gobject`, `playerctl`, `imagemagick` (all present on a HyDE install) and `gtk4-layer-shell` for the overlay and glow.
 
 ```sh
 # link encore into your HyDE install (nothing is overwritten)
-for f in encore.py encore.sh encorelib; do
+for f in encore.py encore.sh encorelib encoregui; do
   ln -s "$PWD/Configs/.local/lib/hyde/$f" ~/.local/lib/hyde/$f
 done
-ln -s "$PWD/Configs/.config/hypr/hyprlock/Encore.conf" ~/.config/hypr/hyprlock/Encore.conf
+# copy, not link: hyprlock.sh does not follow symlinked layouts
+cp Configs/.config/hypr/hyprlock/Encore.conf ~/.config/hypr/hyprlock/Encore.conf
 
 hyde-shell encore daemon          # run in a terminal, play a song
-hyde-shell encore hyprlock        # current lyric line as Pango markup
+hyde-shell encore toggle          # lyrics overlay on or off
+hyde-shell encore menu            # player window
 hyde-shell hyprlock.sh --select   # pick the "Encore" lock screen layout
 ```
+
+Suggested binds and the player window rule are in `Configs/.local/share/hypr/lua/key_binds.encore.lua` and `window_rules.encore.lua`; copy them into `~/.config/hypr/hyprland.lua`.
+The binds are SUPER+ALT+L (overlay), SUPER+ALT+K (next style), SUPER+ALT+M (player) and SUPER+ALT+E (show workspace).
 
 To start it with your session, add to `~/.config/hyde/config.toml`:
 
@@ -53,6 +61,7 @@ encore = "hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-encore.service -t service 
 ## Configuration
 
 All keys live in `~/.config/hyde/config.toml`; see `Configs/.local/share/hyde/schema/config.toml` for the full list.
+Changes made live through `encore look`, `encore style` or the player window sit on top of these and reset on reboot.
 
 ```toml
 [encore]
@@ -70,9 +79,10 @@ dim = ""                # unsung words; empty uses album text at 50%
 
 [encore.overlay]
 enable = false          # start the overlay with the service
+style = "line"          # line, stack or constellation
 position = "bottom"     # top, center or bottom
 margin = 120
-font = "JetBrainsMono Nerd Font"
+font = "SF Pro Display, Inter, Cantarell, sans-serif"
 size = 30
 next_line = true
 color = ""              # sung words; empty uses the album accent
