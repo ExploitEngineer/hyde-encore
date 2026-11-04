@@ -87,3 +87,15 @@ def test_glow_keys_rejected_out_of_range(tmp_path):
         lyric_color="pink",
     )
     assert read_look(p) == {}
+
+
+def test_glow_monitor_is_a_look_key(tmp_path):
+    from encorelib.look import read_look, update_look
+
+    path = tmp_path / "encore.look"
+    update_look(path, glow_monitor="HDMI-A-1")
+    assert read_look(path)["glow_monitor"] == "HDMI-A-1"
+    update_look(path, glow_monitor="")  # empty is not a connector
+    assert read_look(path)["glow_monitor"] == "HDMI-A-1"
+    update_look(path, glow_monitor=None)
+    assert "glow_monitor" not in read_look(path)

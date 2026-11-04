@@ -209,11 +209,13 @@ def test_hyprlock_track_lines_escaped():
 
 
 def test_hyprlock_colors_defaults_from_palette():
+    from encorelib.colors import scheme
     from encorelib.config import EncoreConfig
     from encorelib.protocol import hyprlock_colors
 
-    accent, dim = hyprlock_colors(EncoreConfig(), {"1xa8": "CAAAF0", "txt1": "09090A"})
-    assert accent == "#CAAAF0"
+    palette = {"1xa8": "CAAAF0", "txt1": "09090A"}
+    accent, dim = hyprlock_colors(EncoreConfig(), palette, {})
+    assert accent == "#" + scheme(palette, {}).accent  # the vivid scheme accent, same hue
     assert dim == "#FFFFFF66"  # soft white at 40%, never the palette's (maybe dark) text color
 
 

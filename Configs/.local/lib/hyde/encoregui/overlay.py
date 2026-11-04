@@ -1024,16 +1024,16 @@ class Overlay:
 
     def _draw_cluster(self, sc: Scene, width, height, line_key, texts, ix, now, fade=1.0):
         positions = self._positions(line_key, texts, width, height)
-        unit = self._line_px() * 1.3  # the sung word; ~54 px at 1080p and size 30
+        unit = self._line_px() * 1.8  # the sung word; ~77 px at 1080p and size 30
         lyric, _highlight, secondary = self._trio()
         accent = self.accent_rgb
         # hairlines in the accent, brighter toward the newest word
         for i in range(min(ix, len(positions) - 1)):
             age = ix - 1 - i
             (x1, y1), (x2, y2) = positions[i], positions[i + 1]
-            sc.line(x1, y1, x2, y2, 1.4, accent, max(0.12, 0.42 - 0.07 * age) * fade)
-        spark, _sw, _sh = self._word_surface("✦", max(10, int(unit * 0.26)), accent, False)
-        past = max(14, int(unit * 0.44))
+            sc.line(x1, y1, x2, y2, 2.0, accent, max(0.16, 0.55 - 0.08 * age) * fade)
+        spark, _sw, _sh = self._word_surface("✦", max(12, int(unit * 0.3)), accent, False)
+        past = max(16, int(unit * 0.5))
         for i in range(ix):
             dx, dy = self._drift(now, i)
             x, y = positions[i][0] + dx, positions[i][1] + dy

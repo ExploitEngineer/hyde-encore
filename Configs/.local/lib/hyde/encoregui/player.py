@@ -401,14 +401,14 @@ class Player(Gtk.ApplicationWindow):
         bar.append(self.palette_button)
         bar.append(
             _icon_button(
-                "audio-volume-high-symbolic",
+                "media-view-subtitles-symbolic",
                 lambda *_: self._hyde("toggle"),
-                tooltip="Lyrics overlay",
+                tooltip="Lyrics on the desktop",
             )
         )
         bar.append(
             _icon_button(
-                "display-brightness-symbolic", lambda *_: self._hyde("glow"), tooltip="Glow"
+                "weather-clear-symbolic", lambda *_: self._hyde("glow"), tooltip="Screen glow"
             )
         )
         settings = Gtk.Button(label="Settings")
@@ -418,7 +418,7 @@ class Player(Gtk.ApplicationWindow):
         bar.append(settings)
         bar.append(
             _icon_button(
-                "video-display-symbolic",
+                "view-paged-symbolic",
                 lambda *_: self._hyde("style", "next"),
                 tooltip="Next lyrics style",
             )
@@ -689,9 +689,7 @@ class Player(Gtk.ApplicationWindow):
         names = self._monitors()
         index = dropdown.get_selected()
         if 0 <= index < len(names):
-            self._run(
-                ["notify-send", "encore", f"Display {names[index]} applies on next overlay start"]
-            )
+            self._look(glow_monitor=names[index])  # the glow moves there at once
 
     def _on_lock_player(self, _switch, state) -> bool:
         if not getattr(self, "_syncing", False) and state:
@@ -886,9 +884,10 @@ class Player(Gtk.ApplicationWindow):
         eased = 1 - (1 - self.expanded) ** 3
         # album-tinted bloom behind the art, stronger when expanded
         cx, cy = width / 2, height * 0.36
-        glow = cairo.RadialGradient(cx, cy, 20, cx, cy, max(width, height) * (0.38 + 0.25 * eased))
-        glow.add_color_stop_rgba(0, r, g, b, 0.22 + 0.20 * eased)
-        glow.add_color_stop_rgba(0.55, r, g, b, 0.07 + 0.10 * eased)
+        glow = cairo.RadialGradient(cx, cy, 20, cx, cy, max(width, height) * (0.46 + 0.22 * eased))
+        # the art hides the center, so the visible ring carries the color
+        glow.add_color_stop_rgba(0, r, g, b, 0.42 + 0.18 * eased)
+        glow.add_color_stop_rgba(0.5, r, g, b, 0.17 + 0.10 * eased)
         glow.add_color_stop_rgba(1, r, g, b, 0.0)
         cr.set_source(glow)
         cr.paint()
@@ -937,6 +936,9 @@ class Player(Gtk.ApplicationWindow):
         self._syncing = True
         try:
             self.gradient.set_selected(look.get("glow_colors", 2) - 1)
+            names = self._monitors()
+            if look.get("glow_monitor") in names:
+                self.display.set_selected(names.index(look["glow_monitor"]))
             self.animation.set_selected(
                 ("music", "breathe", "static").index(look.get("glow_animation", "music"))
             )

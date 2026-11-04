@@ -149,6 +149,7 @@ class Glow:
         # cover the true screen edge, waybar and corners included
         LayerShell.set_exclusive_zone(window, -1)
         place_on(window, cfg.glow_monitor)
+        self.placed_monitor = cfg.glow_monitor
         display = window.get_display()
         Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
         # a small texture stretched by the GPU: the CPU only rasterises
@@ -209,7 +210,22 @@ class Glow:
         """Glow settings from the player's popover, applied live."""
         self.look = read_look(self.look_path)
         self._resolve_colors()
+        self._place()
         self._queue()
+
+    def _place(self) -> None:
+        """Pin the glow to the chosen display; a layer surface moves by remapping."""
+        wanted = self.look.get("glow_monitor") or self.cfg.glow_monitor
+        if wanted == self.placed_monitor:
+            return
+        self.placed_monitor = wanted
+        _, window, _picture = self.windows[0]
+        shown = window.get_visible()
+        if shown:
+            window.set_visible(False)
+        place_on(window, wanted)
+        if shown:
+            window.set_visible(True)
 
     def _resolve_colors(self) -> None:
         look = self.look
