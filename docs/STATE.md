@@ -4,7 +4,7 @@ Goal: match, then beat, Verci (lyrics) and Lumn (glow, player), polished enough 
 Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 glow, 5 player, 6 lock screen and HyDE integration, 7 review.
 
 ## Shipped (main, PRs #1-#8)
-- Engine (`encorelib/`): LRC and enhanced LRC parser (syllable tags merge into words), CJK-aware word tokens, word-timing estimator calibrated on real word sync, gap-aware cursor, playback clock that keeps the rate across resyncs, config loader, providers (local `.lrc` always wins and is never cached, LRCLIB with junk-upload filter and up to three search variants for feat. credits, release qualifiers and browser "Artist - Title" videos, Spicy Lyrics syllable sync with a user key), versioned LRU lyrics cache (2000 tracks, errors never cached), album palette via `wallbash.sh`, JSON-lines protocol v1 (`lyrics.lines`, `line.text`, `gap`).
+- Engine (`encorelib/`): LRC and enhanced LRC parser (syllable tags merge into words), CJK-aware word tokens, word-timing estimator calibrated on real word sync, gap-aware cursor, playback clock that keeps the rate across resyncs, config loader, providers (local `.lrc` always wins and is never cached, LRCLIB with junk-upload filter and up to three search variants for feat. credits, release qualifiers and browser "Artist - Title" videos, Spicy Lyrics syllable sync with a user key), versioned LRU lyrics cache (2000 tracks, errors never cached), album palette via `wallbash.sh`, JSON-lines protocol v1 (`lyrics.lines`, `line.text`, `gap` whenever no line is live).
 - Daemon (`encore daemon`): follows the most recently started MPRIS player or `[encore] players`, worker-thread fetches guarded against stale results, publishes `encore.sock` plus hyprlock line, track and cover files.
 - Overlay (`encore toggle`, `encore style`): GTK4 layer-shell, click-through, styles `line` (karaoke strip), `stack` (rolling column, ghost trails, mixed fonts), `constellation` (word chain, hairlines, cluster fade), `visual` (full-bleed art layer, column with glyphs and a Highlight marker).
 - Live look (`encore look`, runtime `encore.look`): style, font, size, Lyric Text / Highlight / Secondary colors, next line, motion.
@@ -13,7 +13,7 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 - Profiles `working` and `show` (`encore profile`); `encore show` toggles the empty `encore` workspace.
 - hyprlock `Encore.conf`: art, title, artist, word-highlighted line.
 - Upstream fragments: schema and config toml, `variables.encore.lua` (hc.start), `key_binds.encore.lua` (SUPER+ALT+{L,K,M,E}), `window_rules.encore.lua` (player floats).
-- 246 unit tests, ruff clean; `tests/e2e/fake_mpris.py` scriptable MPRIS player; `tests/tools/calibrate_timing.py` scores the estimator against cached word sync.
+- 254 unit tests, ruff clean; `tests/e2e/fake_mpris.py` scriptable MPRIS player; `tests/tools/calibrate_timing.py` scores the estimator against cached word sync.
 
 ## Measured (this laptop, 2026-11-03/04)
 - Daemon: playing ~0.4% of a core, ~40 MB RSS; paused 0 ticks over 10 s.
@@ -30,7 +30,6 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 ## Unverified on screen
 - Player lyrics list with a real synced song, art hover-expand, glow following the Settings popover live.
 - Overlay click-through press test; a full-resolution pixel pass of each style against `.reference/`.
-- Player lyrics list during an instrumental gap: `line` is null, so no row is highlighted until layer 5 maps `gap.after`.
 
 ## Broken or placebo
 - Glow popover Display picker only posts a notification; nothing moves.

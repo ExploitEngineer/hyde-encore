@@ -257,11 +257,16 @@ def test_build_state_live_line_has_no_gap():
     assert state["next"] == "three"
 
 
-def test_build_state_outro_has_no_gap():
+def test_build_state_outro_gap_has_no_until():
     state = build_state("playing", TRACK, None, GAPPY, clock_at(90.0), {})
     assert state["line"] is None
-    assert state["gap"] is None
+    assert state["gap"] == {"after": 2, "until": None}
     assert state["next"] is None
+
+
+def test_build_state_unsynced_has_no_gap():
+    lyr = Lyrics((Line(0.0, 0.0, "a"),), "none", "t")
+    assert build_state("playing", TRACK, None, lyr, clock_at(5.0), {})["gap"] is None
 
 
 CJK_WORDS = tuple(Word(c, i, i + 1) for i, c in enumerate("夜に駆ける"))

@@ -46,10 +46,13 @@ def build_state(
             (i for i in range(cursor.after + 1, len(lyrics.lines)) if lyrics.lines[i].text.strip()),
             None,
         )
+        until = None
         if upcoming is not None:
             nxt = lyrics.lines[upcoming].text
-            if line is None:
-                gap = {"after": cursor.after, "until": lyrics.lines[upcoming].start}
+            until = lyrics.lines[upcoming].start
+        if line is None:
+            # where playback sits while no line is live; until is None in the outro
+            gap = {"after": cursor.after, "until": until}
     return {
         "v": PROTOCOL_VERSION,
         "ts": ts,

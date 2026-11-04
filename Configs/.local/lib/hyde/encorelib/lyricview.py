@@ -82,6 +82,25 @@ def build_view(state: dict | None, now: float) -> View:
     )
 
 
+def lyric_rows(lines: list[dict]) -> list[str]:
+    """Texts of the whole-song list: every line that is not blank."""
+    return [ln["text"] for ln in lines if (ln.get("text") or "").strip()]
+
+
+def lyric_row(state: dict) -> int:
+    """Row of lyric_rows() to highlight, -1 for none.
+
+    The live line wins; in a gap the row of the line the gap follows stays
+    lit, so the list keeps its place through instrumentals.
+    """
+    lines = (state.get("lyrics") or {}).get("lines") or []
+    line = state.get("line")
+    index = line["index"] if line else (state.get("gap") or {}).get("after", -1)
+    if not 0 <= index < len(lines):
+        return -1
+    return len(lyric_rows(lines[: index + 1])) - 1
+
+
 def should_transition(old_key: str, new_key: str) -> bool:
     """A slide cross-fade only makes sense between lines of the same track.
 

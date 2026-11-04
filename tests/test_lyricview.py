@@ -1,6 +1,12 @@
 import pytest
 
-from encorelib.lyricview import GAP_HIDE_SECONDS, build_view, live_position
+from encorelib.lyricview import (
+    GAP_HIDE_SECONDS,
+    build_view,
+    live_position,
+    lyric_row,
+    lyric_rows,
+)
 
 
 def state(**kw):
@@ -180,3 +186,38 @@ def test_build_view_uses_line_text():
         ],
     }
     assert build_view(state(line=line), 1000.0).text == "夜に"
+
+
+SONG = [
+    {"start": 1.0, "text": "a"},
+    {"start": 2.0, "text": ""},
+    {"start": 3.0, "text": "  "},
+    {"start": 4.0, "text": "b"},
+]
+
+
+def test_lyric_rows_skip_blank_lines():
+    assert lyric_rows(SONG) == ["a", "b"]
+
+
+def row_state(line_index=None, gap=None):
+    line = {"index": line_index, "words": []} if line_index is not None else None
+    return {"lyrics": {"lines": SONG}, "line": line, "gap": gap}
+
+
+def test_lyric_row_live_line():
+    assert lyric_row(row_state(line_index=3)) == 1
+
+
+def test_lyric_row_keeps_place_in_a_gap():
+    assert lyric_row(row_state(gap={"after": 0, "until": 4.0})) == 0
+    assert lyric_row(row_state(gap={"after": 2, "until": 4.0})) == 0
+
+
+def test_lyric_row_outro_keeps_last_row():
+    assert lyric_row(row_state(gap={"after": 3, "until": None})) == 1
+
+
+def test_lyric_row_intro_and_no_lyrics():
+    assert lyric_row(row_state(gap={"after": -1, "until": 1.0})) == -1
+    assert lyric_row({}) == -1
