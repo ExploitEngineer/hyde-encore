@@ -28,9 +28,11 @@ from encoregui.fullscreen import FullPage
 from encoregui.home import HomePage, LyricsPage
 from encoregui.idle import IdleField
 from encoregui.popovers import build_look_menu, build_settings_popover
+from encoregui.tray import Tray
 from encoregui.ui import accent_rules, hex_rgb, icon_button, icon_image, install_css
 from encorelib.colors import scheme as color_scheme
 from encorelib.config import load_config
+from encorelib.lifecycle import close_action
 from encorelib.lockscreen import ENCORE_LAYOUT, read_layout
 from encorelib.look import state_look_path, update_look
 from encorelib.palette import wallpaper_palette
@@ -76,6 +78,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.restarted = False
         self.lock_on = False
         self.toggles: dict[str, Gtk.Button] = {}
+        self.tray = Tray()
+        self.held = False  # the app stays alive while the window hides in the tray
 
         overlay = Gtk.Overlay()
         self.set_child(overlay)
@@ -105,6 +109,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.stack.add_named(self.full, "full")
         atexit.register(self.full.clear_flag)  # the desktop overlay must never stay hidden
         self.connect("notify::fullscreened", self._on_fullscreened)
+        self.connect("close-request", self._on_close_request)
         self.toolbar = self._build_toolbar()
         root.append(self.toolbar)
 
@@ -254,6 +259,51 @@ class EncoreWindow(Gtk.ApplicationWindow):
         )
         return bar
 
+    # closing and the tray --------------------------------------------------
+
+    def _on_close_request(self, *_) -> bool:
+        """Closing keeps Encore in the tray while desktop lyrics or glow run; else quits."""
+        if (
+            close_action(self.running("encore-overlay.pid"), self.running("encore-glow.pid"))
+            == "quit"
+        ):
+            self.quit_all()
+            return True
+        if self.page == "full":
+            self.show_page("home")
+        app = self.get_application()
+        if app is not None and not self.held:
+            app.hold()
+            self.held = True
+        self.set_visible(False)
+        self.tray.start(self.show_window, self._tray_action)
+        self._sync_toggles()
+        return True
+
+    def show_window(self) -> None:
+        """Bring the window back (from the tray or a new launch)."""
+        if not self.get_visible():
+            self.set_visible(True)
+        self.present()
+        if self.held:
+            app = self.get_application()
+            if app is not None:
+                app.release()
+            self.held = False
+        self.tray.stop()
+
+    def _tray_action(self, action: str) -> None:
+        if action == "open":
+            self.show_window()
+        elif action in ("play-pause", "next"):
+            self.ctl(action)
+        elif action == "desktop":
+            self.encore("toggle")
+        elif action == "glow":
+            self.encore("glow")
+        elif action == "quit":
+            self.quit_all()
+
     # actions ----------------------------------------------------------------
 
     @staticmethod
@@ -293,6 +343,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
 
     def quit_all(self) -> None:
         """Quit Encore: the desktop lyrics and the glow stop with the window."""
+        self.tray.stop()
         self.full.shutdown()
         for name in ("encore-overlay.pid", "encore-glow.pid"):
             pid = read_pid(Path(self.runtime_dir) / name)
@@ -394,6 +445,10 @@ class EncoreWindow(Gtk.ApplicationWindow):
             "glow": self.running("encore-glow.pid"),
             "lock": self.lock_on,
         }
+        if self.tray.active:
+            self.tray.update(
+                states["desktop"], states["glow"], self.state.get("status") == "playing"
+            )
         for key, on in states.items():
             button = self.toggles.get(key)
             if button is None:
@@ -443,8 +498,16 @@ def run_app(runtime_dir: str, page: str | None = None) -> int:
     app = Gtk.Application(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
     holder: dict[str, EncoreWindow] = {}
 
-    def on_startup(_app) -> None:
+    def on_startup(application) -> None:
         install_css()
+        # app actions, reachable over D-Bus (org.gtk.Actions) like any GTK app's
+        for name, handler in (
+            ("close", lambda: holder["window"].close()),
+            ("quit", lambda: holder["window"].quit_all()),
+        ):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda *_a, h=handler: "window" in holder and h())
+            application.add_action(action)
 
     def on_command_line(application, command_line) -> int:
         # the first launch and every later one land here, in the first instance
@@ -455,7 +518,7 @@ def run_app(runtime_dir: str, page: str | None = None) -> int:
             requested = requested or "home"
         if requested:
             window.show_page(requested)
-        window.present()
+        window.show_window()
         return 0
 
     app.connect("startup", on_startup)
