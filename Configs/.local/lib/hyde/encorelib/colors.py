@@ -128,3 +128,36 @@ def scheme(cover: dict[str, str], theme: dict[str, str]) -> Scheme:
 def text_on(block: str) -> str:
     """White or ink, whichever reads better on a block color."""
     return "FFFFFF" if contrast_ratio("FFFFFF", block) >= contrast_ratio(INK, block) else INK
+
+
+@dataclass(frozen=True)
+class Resolved:
+    """The colors one frame draws with, after the user's overrides."""
+
+    sung: str  # line fill and constellation: `color`, else the accent
+    column_sung: str  # stack's sung word: Highlight, else `color`, else the accent
+    highlight: str  # visual's block: Highlight, else `color`, else the scheme block
+    on_highlight: str
+    lyric: str
+    secondary: str
+
+
+def _hexless(value: str) -> str:
+    return value.lstrip("#").upper()
+
+
+def resolve(colors: Scheme, look: dict, override: str) -> Resolved:
+    """Apply look overrides (Lyric Text, Highlight, Secondary) and `color` to a scheme."""
+    color = _hexless(override) if override else ""
+    picked = _hexless(look["highlight_color"]) if look.get("highlight_color") else ""
+    highlight = picked or color or colors.highlight
+    return Resolved(
+        sung=color or colors.accent,
+        column_sung=picked or color or colors.accent,
+        highlight=highlight,
+        on_highlight=text_on(highlight),
+        lyric=_hexless(look["lyric_color"]) if look.get("lyric_color") else colors.lyric,
+        secondary=(
+            _hexless(look["secondary_color"]) if look.get("secondary_color") else colors.secondary
+        ),
+    )

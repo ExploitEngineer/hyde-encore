@@ -319,7 +319,8 @@ class Encore:
     def apply_palette(self, token: int, key: str, art, palette) -> bool:
         if self.palette_gate.accept(token, key):
             self.art = art
-            self.palette = palette or wallpaper_palette()
+            self.theme = wallpaper_palette()  # once per track: wallpaper or theme may change
+            self.palette = palette or self.theme
             self.last_cursor = None
             self.publish()
         return False

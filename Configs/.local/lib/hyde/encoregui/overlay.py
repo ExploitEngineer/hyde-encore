@@ -28,8 +28,8 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
 from encoregui.outputs import find_monitor, place_on
+from encorelib.colors import resolve
 from encorelib.colors import scheme as color_scheme
-from encorelib.colors import text_on
 from encorelib.config import EncoreConfig
 from encorelib.constellation import chain_words
 from encorelib.glyphs import glyph_for
@@ -137,6 +137,7 @@ class LineRaster:
         to half its length, so it cannot be used.
         """
         out = []
+        pad = self.pad  # the text is drawn this far down (room for shadow and bloom)
         for word, (a, b) in zip(words, word_byte_ranges(text, words)):
             if b <= a:
                 out.append([])
@@ -144,6 +145,7 @@ class LineRaster:
             last_start = b - len(word[-1].encode("utf-8"))
             xa, ya, wa, ha = self._char_box(layout, a)
             xz, yz, wz, hz = self._char_box(layout, last_start)
+            ya, yz = ya + pad, yz + pad
             if abs(ya - yz) < ha / 2:
                 left = min(xa, xz)
                 right = max(xa + wa, xz + wz)
@@ -673,7 +675,7 @@ class Overlay:
             )
             drifting = self.motion and view.visible and playing
             still = moving or drifting
-            if still and not moving:
+            if still and not moving and not changed_key:
                 # the idle drift moves a few pixels a second: 15 fps reads the
                 # same as 30 and halves the compositing of a full-screen canvas
                 self.drift_frame = not getattr(self, "drift_frame", False)
@@ -760,7 +762,7 @@ class Overlay:
         if full:
             cr.save()
             for x, ry, rw, rh in full:
-                cr.rectangle(x - 2, ry - 4, rw + 4, rh + 8)
+                cr.rectangle(x - 2, ry - raster.pad, rw + 4, rh + 2 * raster.pad)
             cr.clip()
             cr.set_source_surface(raster.bright, 0, 0)
             cr.paint()
@@ -782,7 +784,7 @@ class Overlay:
                 # is fully lit once the edge has passed its end
                 edge = x + take
                 cr.save()
-                cr.rectangle(x - 2, ry - 4, min(take, rw) + 4, rh + 8)
+                cr.rectangle(x - 2, ry - raster.pad, min(take, rw) + 4, rh + 2 * raster.pad)
                 cr.clip()
                 gradient = cairo.LinearGradient(edge - feather, 0, edge, 0)
                 gradient.add_color_stop_rgba(0, 1, 1, 1, 1)
@@ -895,18 +897,17 @@ class Overlay:
     def _stagger(self, line_key: str, index: int, width: int) -> float:
         return (hash((line_key, "x", index)) % 1000 / 1000 - 0.5) * width * 0.05
 
+    def _resolved(self):
+        """The scheme after look overrides and `color` (see colors.resolve)."""
+        return resolve(self.colors, self.look_cache, self.color_override)
+
     def _trio(self) -> tuple[tuple, tuple, tuple]:
-        """(lyric, highlight, secondary) colors: look overrides, else the album scheme."""
-        look = self.look_cache
-        colors = self.colors
-        lyric = _hex_rgb(look.get("lyric_color", colors.lyric))
-        highlight = _hex_rgb(look.get("highlight_color", colors.highlight))
-        secondary = _hex_rgb(look.get("secondary_color", colors.secondary))
-        return lyric, highlight, secondary
+        """(lyric, highlight, secondary) colors after the user's overrides."""
+        r = self._resolved()
+        return _hex_rgb(r.lyric), _hex_rgb(r.highlight), _hex_rgb(r.secondary)
 
     def _on_highlight(self) -> tuple:
-        block = self.look_cache.get("highlight_color", "#" + self.colors.highlight)
-        return _hex_rgb(text_on(block.lstrip("#")))
+        return _hex_rgb(self._resolved().on_highlight)
 
     def _column_base(self, height: int) -> float:
         """Column font unit: ~8% of the screen height at the default size,
@@ -967,8 +968,9 @@ class Overlay:
             if current and visual:
                 rgb, dim = self._on_highlight(), False
             elif current:
-                # the highlight is a block fill; bare words need the readable accent
-                rgb, dim = self.accent_rgb, False
+                # Highlight (or `color`) when the user picked one; else the readable
+                # accent, since the scheme's highlight is a block fill, too dark bare
+                rgb, dim = _hex_rgb(self._resolved().column_sung), False
             elif slot >= 1.6:
                 rgb, dim = secondary, True
             else:
