@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 KEEP = 50
@@ -30,16 +31,26 @@ def read_lines(path: Path) -> list[dict]:
     return rows
 
 
+_LOCK = threading.Lock()  # lookups run on up to two workers at once
+
+
 def append_capped(path: Path, record: dict, keep: int = KEEP) -> None:
-    """Add a record, keeping only the newest `keep`; written atomically."""
+    """Add a record, keeping only the newest `keep`; atomic, and never raises.
+
+    A full or read-only runtime dir must cost the journal, never the lyrics.
+    """
     path = Path(path)
-    rows = [*read_lines(path), record][-keep:]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            for row in rows:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        os.replace(tmp, path)
-    except OSError:
-        Path(tmp).unlink(missing_ok=True)
+    with _LOCK:
+        try:
+            rows = [*read_lines(path), record][-keep:]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        except OSError:
+            return
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                for row in rows:
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            os.replace(tmp, path)
+        except OSError:
+            Path(tmp).unlink(missing_ok=True)

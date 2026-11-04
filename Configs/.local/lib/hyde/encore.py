@@ -293,6 +293,8 @@ class Encore:
         except Exception as e:
             log.exception("lyrics lookup failed")
             lyrics, result = None, f"error: {e}"
+        self.GLib.idle_add(self.apply_lyrics, token, key, lyrics)
+        # after the hand-off: the journal must never delay or block the lyrics
         append_capped(
             LOOKUPS_PATH,
             {
@@ -304,7 +306,6 @@ class Encore:
                 "result": result,
             },
         )
-        self.GLib.idle_add(self.apply_lyrics, token, key, lyrics)
 
     def apply_lyrics(self, token: int, key: str, lyrics) -> bool:
         if self.lyrics_gate.accept(token, key):

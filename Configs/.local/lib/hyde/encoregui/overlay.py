@@ -29,6 +29,7 @@ from gi.repository import Gtk4LayerShell as LayerShell
 
 from encoregui.outputs import find_monitor, place_on
 from encoregui.scene import Image, Scene
+from encorelib.bytecache import ByteLRU
 from encorelib.colors import resolve
 from encorelib.colors import scheme as color_scheme
 from encorelib.config import EncoreConfig
@@ -52,6 +53,7 @@ from encorelib.wordrects import word_byte_ranges
 
 TRANSITION_SECONDS = 0.22
 ANIMATE_MS = 33
+WORD_CACHE_BYTES = 48 * 1024 * 1024
 SLIDE_PX = 26
 FEATHER_PX = 26
 CREDIT_SECONDS = 10.0
@@ -240,7 +242,8 @@ class Overlay:
         self.timeout_id = 0
         self.rasters: dict[tuple, LineRaster] = {}
         self.small: dict[tuple, LineRaster] = {}
-        self.word_cache: dict[tuple, tuple[cairo.ImageSurface, float, float]] = {}
+        # word and cover textures, bounded by bytes: big column words at 4K run to megabytes
+        self.word_cache = ByteLRU(WORD_CACHE_BYTES)
         self.look_path = os.path.join(runtime_dir, "encore.look")
         (
             self.style,
@@ -468,7 +471,7 @@ class Overlay:
 
     def _reload_look(self) -> None:
         self.look_cache = read_look(self.look_path)
-        self.word_cache.clear()  # colors may have changed even if nothing else did
+        self.word_cache = ByteLRU(WORD_CACHE_BYTES)  # colors may have changed
         self.area.queue_draw()
         new = effective(self.cfg, self.look_cache)
         old = (self.style, self.font, self.size, self.color_override, self.show_next, self.motion)
@@ -864,9 +867,7 @@ class Overlay:
         cr2.move_to(0, 0)
         PangoCairo.show_layout(cr2, layout)
         out = (Image.from_surface(surface, w, h), w, h)
-        self.word_cache[key] = out
-        while len(self.word_cache) > 128:
-            self.word_cache.pop(next(iter(self.word_cache)))
+        self.word_cache.put(key, out, surface.get_stride() * surface.get_height())
         return out
 
     def _paint_word(self, sc: Scene, img: Image, cx, cy, alpha=1.0, scale=1.0):
@@ -1123,9 +1124,14 @@ class Overlay:
 
     def _cover_image(self, path: str) -> Image | None:
         key = ("cover", path)
-        if key not in self.word_cache:
-            self.word_cache[key] = Image.from_file(path)
-        return self.word_cache[key]
+        hit = self.word_cache.get(key)
+        if hit is None:
+            hit = (Image.from_file(path),)
+            img = hit[0]
+            self.word_cache.put(
+                key, hit, img.texture.get_width() * img.texture.get_height() * 4 if img else 1
+            )
+        return hit[0]
 
     def _draw_card(self, sc: Scene, width, height) -> None:
         state = self.state or {}

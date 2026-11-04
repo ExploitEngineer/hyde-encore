@@ -135,11 +135,15 @@ class Scene:
         """Content inside is fully visible left of x0, fades to nothing at x1."""
         s = self.s
         s.push_mask(Gsk.MaskMode.ALPHA)
-        if x0 > -1e6:
-            s.append_color(_rgba((1, 1, 1), 1.0), _rect(-1e5, y, x0 + 1e5, h))
-        ramp = _ramp()
-        s.append_scaled_texture(ramp.texture, Gsk.ScalingFilter.LINEAR, _rect(x0, y, x1 - x0, h))
-        s.pop()  # end of mask
+        try:
+            if x0 > -1e6:
+                s.append_color(_rgba((1, 1, 1), 1.0), _rect(-1e5, y, x0 + 1e5, h))
+            ramp = _ramp()
+            s.append_scaled_texture(
+                ramp.texture, Gsk.ScalingFilter.LINEAR, _rect(x0, y, x1 - x0, h)
+            )
+        finally:
+            s.pop()  # end of mask
         try:
             yield
         finally:

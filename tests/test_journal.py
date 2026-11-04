@@ -23,3 +23,31 @@ def test_append_writes_unicode_as_is(tmp_path):
     append_capped(path, {"title": "夜に駆ける"})
     assert "夜に駆ける" in path.read_text(encoding="utf-8")
     assert json.loads(path.read_text(encoding="utf-8").strip())["title"] == "夜に駆ける"
+
+
+def test_append_never_raises(tmp_path):
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    ro.chmod(0o500)
+    try:
+        append_capped(ro / "sub" / "encore.lookups", {"i": 1})  # mkdir fails
+        append_capped(ro / "encore.lookups", {"i": 1})  # mkstemp fails
+    finally:
+        ro.chmod(0o700)
+
+
+def test_concurrent_appends_keep_every_record(tmp_path):
+    import threading
+
+    path = tmp_path / "encore.lookups"
+
+    def worker(n):
+        for i in range(20):
+            append_capped(path, {"w": n, "i": i}, keep=100)
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(read_lines(path)) == 40

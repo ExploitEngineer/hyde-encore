@@ -23,7 +23,7 @@ gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
-from encoregui.outputs import place_on
+from encoregui.outputs import find_monitor, place_on
 from encorelib.colors import scheme as color_scheme
 from encorelib.config import EncoreConfig
 from encorelib.glowfield import comet_strength, edge_mix, falloff_stops, perimeter_u
@@ -218,8 +218,10 @@ class Glow:
         wanted = self.look.get("glow_monitor") or self.cfg.glow_monitor
         if wanted == self.placed_monitor:
             return
-        self.placed_monitor = wanted
         _, window, _picture = self.windows[0]
+        if wanted and find_monitor(window.get_display(), wanted) is None:
+            return  # not connected (yet): keep the current output, retry on the next change
+        self.placed_monitor = wanted
         shown = window.get_visible()
         if shown:
             window.set_visible(False)

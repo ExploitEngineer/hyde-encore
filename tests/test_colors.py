@@ -117,3 +117,9 @@ def test_muted_ramp_gives_a_vivid_accent_of_its_hue():
     assert chroma(s.accent) >= 0.45  # not the pastel FFCCEE (chroma 0.2)
     assert abs(hue(s.accent) - hue("E69ACC")) < 6
     assert contrast_ratio(s.accent, "101014") >= 4.5
+
+
+def test_barely_tinted_grey_falls_back_to_the_theme():
+    tinted_grey = {f"1xa{i}": c for i, c in enumerate(["B0B0C8", "9898AC", "707080"], 1)}
+    s = scheme(tinted_grey, THEME)
+    assert s.source == "theme"

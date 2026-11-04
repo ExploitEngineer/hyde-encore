@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from .palette import contrast_ratio
 
 DEFAULT_ACCENT = "B48CFF"  # soft violet: reads well on any dark desktop
-MIN_CHROMA = 0.08  # a family whose most colorful shade is below this is grey
+MIN_CHROMA = 0.15  # below this a family reads as grey (a slight cast must not turn garish)
 DARK = "101014"  # what lyrics sit on: the overlay's shadowed text, dark desktops
 INK = "16121C"  # dark text for light highlight blocks
 _KEY = re.compile(r"^([1-4])xa([1-9])$")
