@@ -1,6 +1,6 @@
 import json
 
-from conftest import FIXTURES
+from paths import FIXTURES
 
 from encorelib.cache import LyricsCache
 from encorelib.config import EncoreConfig

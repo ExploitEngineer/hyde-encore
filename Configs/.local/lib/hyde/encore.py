@@ -23,7 +23,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -34,8 +33,9 @@ if _hyde_lib not in sys.path:
 
 import pyutils.logger as hyde_logger
 from encorelib.cache import LyricsCache
-from encorelib.clock import PlaybackClock
+from encorelib.clock import PlaybackClock, clean_rate
 from encorelib.config import EncoreConfig, load_config
+from encorelib.jobs import LatestJobs
 from encorelib.lookup import lookup_lyrics
 from encorelib.palette import album_palette, cover_png, fetch_art, wallpaper_palette
 from encorelib.protocol import (
@@ -89,8 +89,9 @@ class Encore:
         import gi
 
         gi.require_version("Playerctl", "2.0")
-        from gi.repository import GLib, Playerctl
+        from gi.repository import Gio, GLib, Playerctl
 
+        self.Gio = Gio
         self.GLib = GLib
         self.Playerctl = Playerctl
         self.cfg = cfg
@@ -99,6 +100,9 @@ class Encore:
         self.clock = PlaybackClock()
         self.lyrics_gate = FetchGate()
         self.palette_gate = FetchGate()
+        # skipping through songs only ever needs the newest track's work
+        self.lyrics_jobs = LatestJobs(workers=2)
+        self.palette_jobs = LatestJobs(workers=1)
         self.player = None
         self.track: TrackInfo | None = None
         self.art_url = ""
@@ -110,6 +114,10 @@ class Encore:
         self.ticks = 0
         self.recent: list[str] = []
         self.last_cursor = None
+        # MPRIS Rate of the followed player; Playerctl does not expose it
+        self.rate_proxy = None
+        self.rate_instance: str | None = None
+        self.rate_handler = 0
 
         self.manager = Playerctl.PlayerManager()
         self.manager.connect("name-appeared", self.on_name_appeared)
@@ -159,8 +167,51 @@ class Encore:
             if chosen is not None or self.player is not None:
                 logger.info(f"encore follows {name}")
             self.player = chosen
+        self.watch_rate()
         self.refresh_track()
         self.refresh_playback()
+
+    def watch_rate(self) -> None:
+        """Follow the followed player's MPRIS Rate through a D-Bus proxy."""
+        instance = self.player.props.player_instance if self.player is not None else None
+        if instance == self.rate_instance:
+            return
+        if self.rate_proxy is not None and self.rate_handler:
+            self.rate_proxy.disconnect(self.rate_handler)
+        self.rate_proxy, self.rate_handler, self.rate_instance = None, 0, instance
+        if instance is None:
+            return
+        self.Gio.DBusProxy.new_for_bus(
+            self.Gio.BusType.SESSION,
+            self.Gio.DBusProxyFlags.DO_NOT_AUTO_START,
+            None,
+            f"org.mpris.MediaPlayer2.{instance}",
+            "/org/mpris/MediaPlayer2",
+            "org.mpris.MediaPlayer2.Player",
+            None,
+            self.on_rate_proxy,
+            instance,
+        )
+
+    @guarded()
+    def on_rate_proxy(self, _source, result, instance) -> None:
+        proxy = self.Gio.DBusProxy.new_for_bus_finish(result)
+        if instance != self.rate_instance:
+            return  # the followed player changed while the proxy was built
+        self.rate_proxy = proxy
+        self.rate_handler = proxy.connect("g-properties-changed", self.on_player_properties)
+        self.refresh_playback()
+
+    @guarded()
+    def on_player_properties(self, _proxy, changed, _invalidated) -> None:
+        if "Rate" in changed.unpack():
+            self.refresh_playback()
+
+    def player_rate(self) -> float:
+        if self.rate_proxy is None:
+            return 1.0
+        value = self.rate_proxy.get_cached_property("Rate")
+        return clean_rate(value.unpack() if value is not None else None)
 
     @guarded()
     def on_status(self, player, _status) -> None:
@@ -213,6 +264,9 @@ class Encore:
             return
         info, art_url = found
         if self.track is not None and track_key(info) == track_key(self.track):
+            # same song, maybe from another player: keep the lyrics, but take the
+            # new player, track id and url so clients control the right player
+            self.track = info
             if art_url != self.art_url:
                 self.art_url = art_url
                 self.start_palette(info, art_url)
@@ -220,7 +274,7 @@ class Encore:
         self.track, self.art_url = info, art_url
         self.lyrics, self.art, self.last_cursor = None, None, None
         token = self.lyrics_gate.begin(track_key(info))
-        threading.Thread(target=self.fetch_lyrics, args=(info, token), daemon=True).start()
+        self.lyrics_jobs.submit(lambda: self.fetch_lyrics(info, token))
         self.start_palette(info, art_url)
 
     def fetch_lyrics(self, info: TrackInfo, token: int) -> None:
@@ -259,7 +313,7 @@ class Encore:
                 log.exception("album palette failed")
             self.GLib.idle_add(self.apply_palette, token, track_key(info), art, palette)
 
-        threading.Thread(target=work, daemon=True).start()
+        self.palette_jobs.submit(work)
 
     def apply_palette(self, token: int, key: str, art, palette) -> bool:
         if self.palette_gate.accept(token, key):
@@ -280,7 +334,7 @@ class Encore:
     def refresh_playback(self) -> None:
         playing = self.player is not None and self.status_of(self.player) == "Playing"
         position = self.player_position() if self.player is not None else 0.0
-        self.clock.sync(position, playing)
+        self.clock.sync(position, playing, self.player_rate())
         if playing and not self.tick_id:
             self.tick_id = self.GLib.timeout_add(TICK_MS, self.tick)
         elif not playing and self.tick_id:

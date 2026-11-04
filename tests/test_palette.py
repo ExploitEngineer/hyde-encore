@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from conftest import FIXTURES
+from paths import FIXTURES
 
 from encorelib.palette import album_palette, fetch_art, parse_dcol, wallpaper_palette
 from encorelib.providers import ProviderError
