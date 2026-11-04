@@ -75,6 +75,12 @@ def test_cover_falls_back_to_art():
     assert state["track"]["cover"] == "/c/lock.png"
 
 
+def test_state_carries_lookup():
+    pending = build_state("playing", TRACK, None, None, clock_at(1), {}, lookup="pending")
+    assert pending["lookup"] == "pending"
+    assert build_state("stopped", None, None, None, clock_at(0, False), {})["lookup"] is None
+
+
 def test_build_state_no_track():
     state = build_state("stopped", None, None, None, clock_at(0, False), {})
     assert state["track"] is None

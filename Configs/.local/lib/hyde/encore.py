@@ -124,6 +124,7 @@ class Encore:
         self.track: TrackInfo | None = None
         self.art_url = ""
         self.lyrics = None
+        self.lookup: str | None = None  # this track's lyrics lookup: pending or done
         self.art: Path | None = None  # the 512 px PNG lock copy
         self.cover: Path | None = None  # the best full-size cover (HD when found)
         self.look = read_look(LOOK_PATH)
@@ -338,6 +339,7 @@ class Encore:
         if found is None:
             if self.track is not None:
                 self.track, self.lyrics, self.art, self.cover = None, None, None, None
+                self.lookup = None
                 self.lyrics_gate.begin("")
                 self.palette_gate.begin("")
             return
@@ -352,6 +354,7 @@ class Encore:
             return
         self.track, self.art_url = info, art_url
         self.lyrics, self.art, self.cover, self.last_cursor = None, None, None, None
+        self.lookup = "pending"
         token = self.lyrics_gate.begin(track_key(info))
         self.lyrics_jobs.submit(lambda: self.fetch_lyrics(info, token))
         self.start_palette(info, art_url)
@@ -387,6 +390,7 @@ class Encore:
             source = lyrics.source if lyrics else "none"
             logger.info(f"lyrics: {source}")
             self.lyrics = lyrics
+            self.lookup = "done"
             self.last_cursor = None
             self.publish()
         return False
@@ -518,6 +522,7 @@ class Encore:
                 cover=self.cover,
                 players=self.player_names(),
                 volume=self.player_volume(),
+                lookup=self.lookup,
             )
         )
 

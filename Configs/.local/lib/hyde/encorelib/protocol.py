@@ -32,6 +32,7 @@ def build_state(
     cover: Path | None = None,
     players: tuple[str, ...] | list[str] = (),
     volume: float | None = None,
+    lookup: str | None = None,
 ) -> dict:
     """The state line; `art` is the 512 px lock copy, `cover` the best full-size cover."""
     position, ts = clock.anchor()
@@ -78,6 +79,9 @@ def build_state(
             if track
             else None
         ),
+        # "pending" while this track's lyrics lookup runs, "done" after it,
+        # so clients can tell "looking" from "nothing found"
+        "lookup": lookup,
         "lyrics": (
             {
                 "sync": lyrics.sync,

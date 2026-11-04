@@ -282,3 +282,15 @@ def test_look_players_filter_applies_live(harness):
     harness.wait(lambda s: s["player"] == "encoretest")
     update_look(harness.run / "hyde" / "encore.look", players=["encoretest2"])
     harness.wait(lambda s: s["player"] == "encoretest2")
+
+
+def test_lookup_done_without_lyrics(harness):
+    harness.start_player()
+    harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    state = harness.wait(lambda s: s["status"] == "playing" and s.get("lookup") == "done")
+    assert state["lyrics"] is None
+
+
+def test_lookup_done_with_lyrics(playing):
+    assert playing.state()["lookup"] == "done"
