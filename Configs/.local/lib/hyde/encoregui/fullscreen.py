@@ -28,7 +28,7 @@ from encoregui.lyrics import LyricsEngine
 from encoregui.popovers import build_look_menu
 from encoregui.ui import icon_button, trace
 from encorelib.look import read_look
-from encorelib.screen import screen_state
+from encorelib.screen import field_shows, screen_state
 from encorelib.stageflag import render as render_flag
 from encorelib.stream import STYLES
 
@@ -245,6 +245,7 @@ class FullPage(Gtk.Overlay):
 
     def leave(self) -> None:
         """Stop drawing and let the desktop overlay back."""
+        self.backdrop.cancel_hero()  # a hero still under way must not enter() later
         if self.engine is not None:
             self.engine.set_suspended(True)
         if self.hide_timer:
@@ -292,6 +293,7 @@ class FullPage(Gtk.Overlay):
             field.set_colors(colors)
             field.set_playing(state.get("status") == "playing")
             field.set_motion(motion)
+        self.idle_field.set_idle(mode == "idle")  # the clear field holds whenever paused
         set_meta(self.title, self.artist, state)
         self.seek.update(state)
         self.transport.update(state)
@@ -312,7 +314,8 @@ class FullPage(Gtk.Overlay):
                     button.remove_css_class("on")
         background = look.get("stage_bg", "art")
         self.backdrop.set_mode(background)
-        self.clear_field.set_visible(background == "clear")  # under a cover it would only cost
+        # under a cover the field would only cost; without one it is the light
+        self.clear_field.set_visible(field_shows(background, self.backdrop.texture is not None))
         label = "Cover" if background == "art" else "Clear"
         if self.bg_button.get_label() != label:
             self.bg_button.set_label(label)

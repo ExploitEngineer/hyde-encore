@@ -49,3 +49,9 @@ def pick_music_apps(apps: list[tuple[str, str, str]], limit: int = 3) -> list[st
         if "Player" in cats and cats & {"Audio", "AudioVideo"}:
             chosen.append(app_id)
     return chosen[:limit]
+
+
+def field_shows(background: str, has_cover: bool) -> bool:
+    """Whether the album field shows under Full screen: under a clear background,
+    and under a cover background when the track has no cover (never a black window)."""
+    return background == "clear" or not has_cover

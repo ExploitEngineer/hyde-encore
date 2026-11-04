@@ -40,3 +40,34 @@ def visible_range(
     if not overlapping:
         return (n - 1, n - 1) if scroll >= tops[-1] else (0, 0)
     return (max(0, overlapping[0] - 1), min(n - 1, overlapping[-1] + 1))
+
+
+def line_depth(index: int, current: int) -> int:
+    """The depth step of a line; without a current line (unsynced lyrics) every line is sharp."""
+    return step(index - current) if current >= 0 else 0
+
+
+def seek_time(line: dict) -> float | None:
+    """Where a click on the line seeks, or None for a line without a time (plain lyrics)."""
+    start = line.get("start")
+    return None if start is None else float(start)
+
+
+def browse_offset(
+    scroll: float, delta: float, tops: list[float], heights: list[float], view_h: float
+) -> float:
+    """The scroll after the user moves it by delta: never above the top, and no
+    farther down than the end of the song or where following its last line goes."""
+    if not tops:
+        return 0.0
+    end = max(tops[-1] + heights[-1] - view_h, scroll_target(tops, heights, len(tops) - 1, view_h))
+    return max(0.0, min(scroll + delta, max(0.0, end)))
+
+
+def edge_fades(scroll: float, content_h: float, view_h: float, edge: float) -> tuple[float, float]:
+    """How many px fade at the top and at the bottom of the view: the full `edge`
+    once that much content lies beyond it, nothing while the list sits at its
+    start or its end (a line is never dimmed with nothing behind it to reveal)."""
+    top = max(1.0, min(edge, scroll))
+    bottom = max(1.0, min(edge, content_h - (scroll + view_h)))
+    return top, bottom

@@ -104,6 +104,19 @@ class Lab:
         return path
 
 
+def plain_text(lrc: str) -> str:
+    """The LRC's words without any time tag: unsynced lyrics."""
+    out = []
+    for line in lrc.splitlines():
+        while line.startswith("[") and "]" in line:
+            line = line.split("]", 1)[1]
+        while "<" in line and ">" in line[line.index("<") :]:
+            a = line.index("<")
+            line = line[:a] + line[line.index(">", a) + 1 :]
+        out.append(line.strip())
+    return "\n".join(out) + "\n"
+
+
 def default_cover(tmp: Path) -> Path:
     covers = sorted(
         (Path.home() / ".cache" / "hyde" / "encore" / "covers").glob("*.png"),
@@ -187,6 +200,8 @@ def main() -> int:
     parser.add_argument("--no-player", action="store_true", help="no music player: the idle screen")
     parser.add_argument("--no-lyrics", action="store_true", help="no lyrics for the song")
     parser.add_argument("--long-lyrics", action="store_true", help="a 200-line song")
+    parser.add_argument("--plain-lyrics", action="store_true", help="unsynced lyrics, no times")
+    parser.add_argument("--no-cover", action="store_true", help="a track without a cover")
     parser.add_argument(
         "--stop-player", action="store_true", help="close the player once the app is open"
     )
@@ -211,9 +226,15 @@ def main() -> int:
                 for i, t in enumerate(range(1, 401, 2))
             )
             h.write_lrc(args.artist or ARTIST, args.title or TITLE, long_lrc)
+        elif args.plain_lyrics:
+            h.write_lrc(args.artist or ARTIST, args.title or TITLE, plain_text(LRC))
         elif not args.no_lyrics:
             h.write_lrc(args.artist or ARTIST, args.title or TITLE, LRC)
-        cover = Path(args.cover) if args.cover else default_cover(Path(tmp))
+        cover = (
+            ""
+            if args.no_cover
+            else str(Path(args.cover) if args.cover else default_cover(Path(tmp)))
+        )
         player = None
         if args.no_player:
             h.start_daemon()
@@ -221,7 +242,7 @@ def main() -> int:
         else:
             extra = [f"--title={args.title}"] if args.title else []
             extra += [f"--artist={args.artist}"] if args.artist else []
-            player = h.start_player("encoretest", str(cover), *extra)
+            player = h.start_player("encoretest", cover, *extra)
             h.start_daemon()
             h.ctl("encoretest", "play")
             h.wait(
@@ -229,7 +250,7 @@ def main() -> int:
                     s["status"] == "playing"
                     and (args.no_lyrics or s["lyrics"])
                     and s.get("lookup") == "done"
-                    and s["track"]["art"]
+                    and (args.no_cover or s["track"]["art"])
                 ),
                 15,
             )

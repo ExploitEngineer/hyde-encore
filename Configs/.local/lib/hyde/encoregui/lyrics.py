@@ -96,6 +96,40 @@ def _hex_rgb(color: str) -> tuple[float, float, float]:
         return (1.0, 1.0, 1.0)
 
 
+def line_layout(
+    text: str, font: str, size: int, width: int, align: Pango.Alignment = Pango.Alignment.CENTER
+) -> Pango.Layout:
+    """The layout every line raster is built from: bold display type, set a
+    little tighter than text type, word-wrapped at width."""
+    layout = PangoCairo.create_layout(cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)))
+    desc = Pango.FontDescription.from_string(f"{font} Bold")
+    desc.set_absolute_size(size * Pango.SCALE)
+    layout.set_font_description(desc)
+    attrs = Pango.AttrList()
+    attrs.insert(Pango.attr_letter_spacing_new(int(-0.012 * size * Pango.SCALE)))
+    layout.set_attributes(attrs)
+    layout.set_width(width * Pango.SCALE)
+    layout.set_wrap(Pango.WrapMode.WORD)
+    layout.set_alignment(align)
+    layout.set_text(text, -1)
+    return layout
+
+
+def line_pad(size: int) -> int:
+    return max(6, size // 5)  # room for the baked shadow and bloom
+
+
+def line_height(layout: Pango.Layout, size: int) -> int:
+    _, logical = layout.get_pixel_extents()
+    return logical.height + 2 * line_pad(size)
+
+
+def measure_line_height(text: str, font: str, size: int, width: int) -> int:
+    """The height a LineRaster of this line would have, without rasterising it:
+    a layout costs a fraction of a raster, so a long song lays out at once."""
+    return line_height(line_layout(text, font, size, width), size)
+
+
 class LineRaster:
     """Dim and bright surfaces for one line, plus per-word pixel rects."""
 
@@ -113,24 +147,10 @@ class LineRaster:
         align: Pango.Alignment = Pango.Alignment.CENTER,
     ):
         self.scale = scale
-        layout_width = width * Pango.SCALE
-        measure = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
-        context = cairo.Context(measure)
-        layout = PangoCairo.create_layout(context)
-        desc = Pango.FontDescription.from_string(f"{font} Bold")
-        desc.set_absolute_size(size * Pango.SCALE)
-        layout.set_font_description(desc)
-        # display type sits a little tighter than text type
-        attrs = Pango.AttrList()
-        attrs.insert(Pango.attr_letter_spacing_new(int(-0.012 * size * Pango.SCALE)))
-        layout.set_attributes(attrs)
-        layout.set_width(layout_width)
-        layout.set_wrap(Pango.WrapMode.WORD)
-        layout.set_alignment(align)
-        layout.set_text(text, -1)
-        _, logical = layout.get_pixel_extents()
-        self.pad = max(6, size // 5)  # room for the baked shadow and bloom
-        self.height = logical.height + 2 * self.pad
+        self.key: tuple | None = None  # set by a cache that owns the raster
+        layout = line_layout(text, font, size, width, align)
+        self.pad = line_pad(size)
+        self.height = line_height(layout, size)
         self.width = width
         self.rects = self._word_rects(layout, text, words)
         self._shadow_layer = self._shadow(layout)
@@ -696,8 +716,10 @@ class LyricsEngine:
         sc.image(raster.bright_img, (width - raster.width) / 2, (height - raster.height) / 2, alpha)
 
     def _blurred_small(self, raster: LineRaster, radius: float):
-        """A small raster blurred once by the renderer; (texture, margin) or None."""
-        key = ("blur", id(raster), radius)
+        """A small raster blurred once by the renderer; (texture, margin) or None.
+        Keyed by the raster's content key: an evicted raster's id comes back for
+        another line, and would hand it the wrong blur."""
+        key = ("blur", raster.key, radius)
         hit = self.word_cache.get(key)
         if hit is not None:
             return hit[0]
@@ -742,6 +764,7 @@ class LyricsEngine:
                 rest=tint,
                 rest_alpha=0.75,
             )
+            raster.key = key
             self.small[key] = raster
             while len(self.small) > RASTER_CACHE:
                 self.small.pop(next(iter(self.small)))

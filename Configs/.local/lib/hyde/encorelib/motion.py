@@ -5,6 +5,14 @@ from __future__ import annotations
 import math
 import random
 
+FIELD_FPS = 1  # the blobs move a few px/s under an 80 px blur: steps are invisible at 1 fps
+
+
+def field_rate(playing: bool, idle: bool) -> int:
+    """How many times a second the album field drifts: while music plays, or while
+    nothing plays at all (the idle light); 0 holds it still (paused, or no player)."""
+    return FIELD_FPS if playing or idle else 0
+
 
 def _clamp(t: float) -> float:
     return 0.0 if t < 0 else 1.0 if t > 1 else t

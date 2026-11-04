@@ -1,4 +1,4 @@
-from encorelib.screen import lookup_reason, pick_music_apps, screen_state
+from encorelib.screen import field_shows, lookup_reason, pick_music_apps, screen_state
 
 BASE = {"status": "playing", "track": {"key": "k"}, "position": 9, "ts": 0, "rate": 1}
 
@@ -73,3 +73,12 @@ def test_music_apps_skip_encore_and_limit():
     ]
     assert pick_music_apps(apps) == ["a.desktop", "b.desktop", "c.desktop"]
     assert pick_music_apps(apps, limit=1) == ["a.desktop"]
+
+
+def test_field_palette_without_cover():
+    # a coverless track (podcast, local file): the album field shows under Full
+    # screen whatever the background setting, so the window is never black
+    assert field_shows("art", has_cover=False)
+    assert field_shows("clear", has_cover=False)
+    assert field_shows("clear", has_cover=True)
+    assert not field_shows("art", has_cover=True)

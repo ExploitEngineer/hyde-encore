@@ -24,10 +24,8 @@ from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk
 from encoregui.cover import load_texture
 from encoregui.scene import Image, Scene
 from encoregui.ui import trace
-from encorelib.motion import blob_center, grain_texture_bytes
+from encorelib.motion import blob_center, field_rate, grain_texture_bytes
 
-PLAY_FPS = 1  # the blobs move a few px/s under an 80 px blur: steps are invisible at 1 fps
-IDLE_FPS = 3
 BLUR = 80
 WASH = 0.68  # black over the blurred cover, so type reads on any art
 BASE = (0.078, 0.075, 0.09)
@@ -58,10 +56,12 @@ class AlbumField(Gtk.Widget):
         self.light: tuple[tuple, Gdk.Texture] | None = None  # the blobs, at quarter size
         self.grain: Gdk.Texture | None = None
         self.playing = False
+        self.idle = False  # nothing playing at all: the light is the screen
         self.motion = True
         self.hover = 0.0  # 0..1: the cover is being hovered, the light rises
         self.strength = 1.0
         self.timer = 0
+        self.timer_fps = 0
         self.start = time.monotonic()
         self.window_handler = 0
         self.connect("map", lambda *_: self._sync_timer())
@@ -98,6 +98,13 @@ class AlbumField(Gtk.Widget):
             self.playing = playing
             self._sync_timer()
 
+    def set_idle(self, idle: bool) -> None:
+        """Nothing is playing at all: the field drifts as the idle light; a paused
+        track, with or without a cover, holds still."""
+        if idle != self.idle:
+            self.idle = idle
+            self._sync_timer()
+
     def set_motion(self, motion: bool) -> None:
         if motion != self.motion:
             self.motion = motion
@@ -119,17 +126,18 @@ class AlbumField(Gtk.Widget):
     def _wants_motion(self) -> bool:
         window = self.get_root()
         suspended = isinstance(window, Gtk.Window) and window.is_suspended()
-        alive = self.playing or self.texture is None  # playing, or the idle light
+        alive = field_rate(self.playing, self.idle) > 0  # playing, or the idle light
         return self.get_mapped() and not suspended and self.motion and alive
 
     def _sync_timer(self) -> None:
         want = self._wants_motion()
-        fps = PLAY_FPS if self.texture is not None else IDLE_FPS
-        if want and not self.timer:
-            self.timer = GLib.timeout_add(1000 // fps, self._tick)
-        elif not want and self.timer:
+        fps = field_rate(self.playing, self.idle) if want else 0
+        if self.timer and (not want or fps != self.timer_fps):  # stop, or re-arm at the new rate
             GLib.source_remove(self.timer)
             self.timer = 0
+        if want and not self.timer:
+            self.timer_fps = fps
+            self.timer = GLib.timeout_add(1000 // fps, self._tick)
 
     def _tick(self) -> bool:
         if not self._wants_motion():
@@ -171,7 +179,7 @@ class AlbumField(Gtk.Widget):
     def _light_texture(self, w: float, h: float, t: float, strength: float) -> Gdk.Texture | None:
         """The three blobs rendered at quarter size, once per drift step: a paint then
         costs one texture draw instead of three full-window gradients."""
-        fps = PLAY_FPS if self.texture is not None else IDLE_FPS
+        fps = max(1, field_rate(self.playing, self.idle))
         key = (int(t * fps), round(strength, 2), id(self.colors), int(w), int(h))
         if self.light is not None and self.light[0] == key:
             return self.light[1]

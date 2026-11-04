@@ -279,10 +279,9 @@ class CoverBackdrop(Gtk.Widget):
 
     def enter_from(self, x: float, y: float, w: float, h: float, done=None) -> None:
         """Grow the cover from a rect in our coordinates to its full place, then call done."""
+        self.cancel_hero()
         self.hero = (x, y, w, h)
         self.hero_started = 0.0  # the clock starts at the first frame actually painted
-        if self.hero_timer:
-            GLib.source_remove(self.hero_timer)
 
         def tick() -> bool:
             self.queue_draw()
@@ -296,6 +295,15 @@ class CoverBackdrop(Gtk.Widget):
 
         self.hero_timer = GLib.timeout_add(33, tick)
         self.queue_draw()
+
+    def cancel_hero(self) -> None:
+        """Forget a hero entry under way (the page left before it finished, or we
+        left the screen): its done callback never fires."""
+        if self.hero_timer:
+            GLib.source_remove(self.hero_timer)
+            self.hero_timer = 0
+        self.hero = None
+        self.hero_started = 0.0
 
     def _loaded(self, path: str, texture: Gdk.Texture | None) -> None:
         if path != self.path:
@@ -323,6 +331,7 @@ class CoverBackdrop(Gtk.Widget):
             self.remove_tick_callback(self.tick_id)
             self.tick_id = 0
         self.previous = None
+        self.cancel_hero()
 
     def _tick(self, _widget, _clock) -> bool:
         self.queue_draw()
@@ -402,8 +411,10 @@ class CoverBackdrop(Gtk.Widget):
 
     def do_snapshot(self, snapshot) -> None:
         w, h = self.get_width(), self.get_height()
-        if self.mode != "art":
-            return  # clear: the album field under us shows through
+        if self.hero is not None and not self.hero_started:
+            self.hero_started = time.monotonic()  # the entry clock runs from the first paint
+        if self.mode != "art" or (self.texture is None and self.previous is None):
+            return  # clear, or a track with no cover: the album field under us shows through
         sc = Scene(snapshot)
         sc.rect(0, 0, w, h, (0, 0, 0), 1.0)
         t = min(1.0, (time.monotonic() - self.fade_from) / self.FADE_SECONDS)

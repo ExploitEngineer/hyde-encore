@@ -462,7 +462,9 @@ class LyricsPage(Gtk.Box):
         track = state.get("track") or {}
         lyrics = state.get("lyrics") or {}
         if mode in ("lyrics", "plain"):
-            self.list.set_lines(lyrics.get("lines") or [], f"{track.get('key', '')}:{mode}")
+            self.list.set_lines(
+                lyrics.get("lines") or [], f"{track.get('key', '')}:{mode}", plain=mode == "plain"
+            )
             self.list.set_state(state)
             self.right.set_visible_child_name("list")
             return

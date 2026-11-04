@@ -19,6 +19,7 @@ from gi.repository import Gio, GLib
 from harness import LIB, Harness, write_png
 from stage import LAB, LAB_CLASS, Lab, hyprctl, launch_app, open_app
 
+from encorelib.look import update_look
 from encorelib.single import pid_alive, read_pid
 
 pytestmark = [pytest.mark.e2e, pytest.mark.lab]
@@ -214,3 +215,36 @@ def run_cli(h: Harness, *args: str) -> None:
         check=False,
         timeout=15,
     )
+
+
+def test_leaving_full_inside_the_hero_never_enters(lab):
+    """Esc (or any page switch) during the 300 ms hero entry cancels it: the
+    full page must not start its engine under Home later."""
+    trace = lab.tmp / "trace.log"
+    lab.env["ENCORE_TRACE"] = str(trace)
+    _box, app = open_app(lab, lab.lab, "home")
+    assert launch_app(lab, "full", "app-full.log").wait(10) == 0
+    assert launch_app(lab, "home", "app-home.log").wait(10) == 0
+    time.sleep(1.5)
+    lines = trace.read_text().splitlines()
+    home = next(i for i, ln in enumerate(lines) if "show_page home" in ln)
+    entered = [i for i, ln in enumerate(lines) if "full.enter" in ln]
+    if entered and entered[0] < home:
+        pytest.skip("the hero finished before the test could leave")
+    assert not entered, lines[home:]
+    app.terminate()
+
+
+def test_full_screen_enters_on_a_clear_background(lab):
+    """With no cover to draw (Clear background, or a track without art) the hero
+    entry still finishes and the lyrics engine starts."""
+    trace = lab.tmp / "trace.log"
+    lab.env["ENCORE_TRACE"] = str(trace)
+    update_look(lab.run / "hyde" / "encore.look", stage_bg="clear")
+    _box, app = open_app(lab, lab.lab, "full")
+    time.sleep(1.5)
+    lines = trace.read_text().splitlines()
+    assert any("show_page full" in ln for ln in lines)
+    assert any("full.enter" in ln for ln in lines), lines[-8:]
+    assert (lab.run / "hyde" / "encore.stage").exists()
+    app.terminate()

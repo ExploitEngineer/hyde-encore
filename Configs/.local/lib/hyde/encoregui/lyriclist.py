@@ -24,10 +24,18 @@ gi.require_version("Gsk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Graphene, Gtk, Pango
 
-from encoregui.lyrics import LineRaster
+from encoregui.lyrics import LineRaster, measure_line_height
 from encoregui.scene import Image, Scene
 from encorelib.bytecache import ByteLRU
-from encorelib.depth import DEPTH, scroll_target, step, visible_range
+from encorelib.depth import (
+    DEPTH,
+    browse_offset,
+    edge_fades,
+    line_depth,
+    scroll_target,
+    seek_time,
+    visible_range,
+)
 from encorelib.lyricview import LEAD_SECONDS, live_position, lyric_row, next_word_boundary
 from encorelib.motion import ease_out
 from encorelib.words import split_words
@@ -42,6 +50,8 @@ FRAME_MS = 50
 HOVER_ALPHA = 0.7
 RASTER_BYTES = 24 * 1024 * 1024
 PAD_X = 6
+BROWSE_SECONDS = 4.0  # after the user scrolls, following the song resumes this much later
+WHEEL_STEP = 56.0  # px per wheel notch
 
 
 def _hex_rgb(color: str) -> tuple[float, float, float]:
@@ -64,15 +74,20 @@ class LyricList(Gtk.Widget):
         self.colors = None
         self.rasters = ByteLRU(RASTER_BYTES)
         self.blurred = ByteLRU(RASTER_BYTES)  # receded lines, blurred once, as textures
+        self.measured: dict[tuple[str, int], int] = {}  # line heights, from bare layouts
         self.tops: list[float] = []
         self.heights: list[float] = []
         self.layout_width = 0
+        self.plain = False  # unsynced lyrics: no current line, nothing to seek
         self.current = -1
+        self.placed = False  # landed on the current line once the view had a size
         self.scroll = 0.0
         self.scroll_from = 0.0
         self.scroll_to = 0.0
         self.scroll_started = 0.0
         self.scroll_tick = 0
+        self.browse_until = 0.0  # the user scrolled: the list is theirs until then
+        self.browse_id = 0
         self.anim_id = 0
         self.wake_id = 0
         self.drawn = ()  # what the last frame showed, to skip repaints that change nothing
@@ -85,6 +100,9 @@ class LyricList(Gtk.Widget):
         click = Gtk.GestureClick()
         click.connect("released", self._on_click)
         self.add_controller(click)
+        wheel = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
+        wheel.connect("scroll", self._on_scroll)
+        self.add_controller(wheel)
         self.set_cursor_from_name("default")
         self.connect("unmap", lambda *_: self._stop_timers())
 
@@ -97,15 +115,21 @@ class LyricList(Gtk.Widget):
             self.blurred = ByteLRU(RASTER_BYTES)
             self.queue_draw()
 
-    def set_lines(self, lines: list[dict], key: str) -> None:
-        """The song's lines (dicts with start and text); key names the song."""
+    def set_lines(self, lines: list[dict], key: str, plain: bool = False) -> None:
+        """The song's lines (dicts with start and text); key names the song.
+        Plain lines have no times: the list is readable and scrollable, no more."""
         if key == self.key:
             return
         self.key = key
+        self.plain = plain
         self.lines = [ln for ln in lines if (ln.get("text") or "").strip()]
         self.tops, self.heights = [], []
+        self.measured = {}
         self.layout_width = 0
         self.current = -1
+        self.placed = False
+        self.hovered = -1
+        self._end_browsing()
         self.scroll = self.scroll_to = self.scroll_from = 0.0
         self.queue_draw()
 
@@ -114,7 +138,8 @@ class LyricList(Gtk.Widget):
         current = lyric_row(state)
         if current != self.current:
             self.current = current
-            self._scroll_to_current(instant=self.scroll_to == 0.0 and self.scroll == 0.0)
+            if not self._browsing(time.monotonic()):
+                self._scroll_to_current(instant=not self.placed)
         self._schedule()
         shown = (current, (state.get("line") or {}).get("index"), state.get("status"))
         if shown != self.drawn:
@@ -129,11 +154,19 @@ class LyricList(Gtk.Widget):
         self.tops, self.heights = [], []
         y = 0.0
         for index in range(len(self.lines)):
-            raster = self._raster(index, width)
-            height = raster.height if raster is not None else LINE_PX * 1.4
+            height = self._height(index, width)
             self.tops.append(y)
             self.heights.append(height)
             y += height + GAP
+
+    def _height(self, index: int, width: int) -> int:
+        """A line's height from a bare layout, a fraction of a raster's cost: a
+        200-line song lays out in a few ms and only the lines in view rasterise."""
+        key = (self.lines[index]["text"], width)
+        height = self.measured.get(key)
+        if height is None:
+            height = self.measured[key] = measure_line_height(key[0], self.font, LINE_PX, width)
+        return height
 
     def _raster(self, index: int, width: int) -> LineRaster | None:
         if self.colors is None or width <= 0:
@@ -156,12 +189,15 @@ class LyricList(Gtk.Widget):
             rest_alpha=1.0,  # depth sets the opacity, not the raster
             align=Pango.Alignment.LEFT,
         )
+        raster.key = key
         self.rasters.put(key, (raster,), raster.width * raster.height * 8)
         return raster
 
     def _blurred(self, raster: LineRaster, radius: float) -> tuple[Gdk.Texture, float] | None:
-        """The dim line blurred by `radius`, rendered once; (texture, margin)."""
-        key = (id(raster), radius)
+        """The dim line blurred by `radius`, rendered once; (texture, margin). Keyed
+        by the raster's content key: an evicted raster's id comes back for another
+        line, and would hand it the wrong blur."""
+        key = (raster.key, radius)
         hit = self.blurred.get(key)
         if hit is not None:
             return hit
@@ -207,9 +243,51 @@ class LyricList(Gtk.Widget):
         return True
 
     def scroll_to_current(self, instant: bool = False) -> None:
-        """The Lyrics page's 'back to the current line' button."""
+        """The Lyrics page's 'back to the current line' button; ends browsing."""
+        self._end_browsing()
         self._scroll_to_current(instant)
         self.queue_draw()
+
+    # browsing ---------------------------------------------------------------
+
+    def _browsing(self, now: float) -> bool:
+        return now < self.browse_until
+
+    def _end_browsing(self) -> None:
+        self.browse_until = 0.0
+        if self.browse_id:
+            GLib.source_remove(self.browse_id)
+            self.browse_id = 0
+
+    def _on_scroll(self, controller, _dx, dy) -> bool:
+        """The wheel or a touchpad moves the list; the song takes it back after
+        BROWSE_SECONDS (never, for plain lyrics: there is nothing to follow)."""
+        if not self.tops:
+            return False
+        step_px = WHEEL_STEP if controller.get_unit() == Gdk.ScrollUnit.WHEEL else 1.0
+        if self.scroll_tick:  # the user takes over from the follow animation
+            GLib.source_remove(self.scroll_tick)
+            self.scroll_tick = 0
+        self.scroll = browse_offset(
+            self.scroll, dy * step_px, self.tops, self.heights, self.get_height()
+        )
+        self.scroll_to = self.scroll_from = self.scroll
+        self.placed = True
+        self._set_hovered(-1)
+        if not self.plain:
+            self.browse_until = time.monotonic() + BROWSE_SECONDS
+            if self.browse_id:
+                GLib.source_remove(self.browse_id)
+            self.browse_id = GLib.timeout_add(int(BROWSE_SECONDS * 1000), self._resume_follow)
+        self.queue_draw()
+        return True
+
+    def _resume_follow(self) -> bool:
+        self.browse_id = 0
+        self.browse_until = 0.0
+        if self.current >= 0:
+            self._scroll_to_current(instant=False)
+        return False
 
     # word brightening ---------------------------------------------------------
 
@@ -261,7 +339,7 @@ class LyricList(Gtk.Widget):
         return False
 
     def _stop_timers(self) -> None:
-        for attr in ("anim_id", "wake_id", "scroll_tick"):
+        for attr in ("anim_id", "wake_id", "scroll_tick", "browse_id"):
             if getattr(self, attr):
                 GLib.source_remove(getattr(self, attr))
                 setattr(self, attr, 0)
@@ -282,12 +360,15 @@ class LyricList(Gtk.Widget):
             self.queue_draw()
 
     def _on_motion(self, _controller, _x, y) -> None:
-        self._set_hovered(self._line_at(y))
+        self._set_hovered(-1 if self.plain else self._line_at(y))
 
     def _on_click(self, _gesture, _n, _x, y) -> None:
         index = self._line_at(y)
-        if index >= 0 and self.on_seek is not None:
-            self.on_seek(float(self.lines[index].get("start") or 0))
+        if index < 0 or self.plain or self.on_seek is None:
+            return
+        at = seek_time(self.lines[index])
+        if at is not None:
+            self.on_seek(at)
 
     # drawing ----------------------------------------------------------------
 
@@ -296,40 +377,42 @@ class LyricList(Gtk.Widget):
         if w <= 0 or h <= 0 or not self.lines or self.colors is None:
             return
         self._ensure_layout(w - 2 * PAD_X)
-        if self.scroll_to == 0.0 and self.current >= 0 and self.tops:
+        if not self.placed and self.current >= 0 and self.tops:
             # first frame with a size: land on the current line without a scroll
             self.scroll = self.scroll_to = self.scroll_from = scroll_target(
                 self.tops, self.heights, self.current, h
             )
+            self.placed = True
         sc = Scene(snapshot)
         now = time.monotonic()
         line = self.state.get("line") or {}
         self.drawn = (self.current, line.get("index"), self.state.get("status"))
         first, last = visible_range(self.tops, self.heights, self.scroll, h)
-        if True:  # per-line edge fade: an alpha each, never a mask (an offscreen per paint)
-            for index in range(first, last + 1):
-                raster = self._raster(index, w - 2 * PAD_X)
-                if raster is None:
-                    continue
-                depth = step(index - self.current) if self.current >= 0 else 1  # plain: readable
-                scale, alpha, blur = DEPTH[depth]
-                if index == self.hovered and index != self.current:
-                    alpha = max(alpha, HOVER_ALPHA)
-                    blur = min(blur, 1.0)
-                y = self.tops[index] - self.scroll
-                cx, cy = PAD_X + raster.width / 2, y + raster.height / 2
-                alpha *= max(0.0, min(1.0, cy / EDGE_FADE, (h - cy) / EDGE_FADE))
-                if alpha <= 0.01:
-                    continue
-                with sc.group(cx, cy, scale, alpha):
-                    if index == self.current and line:
-                        self._paint_current(sc, raster, self._word_alphas(now))
-                    elif blur > 0 and (soft := self._blurred(raster, blur)) is not None:
-                        texture, margin = soft
-                        img = Image(texture, raster.width + 2 * margin, raster.height + 2 * margin)
-                        sc.image(img, -raster.width / 2 - margin, -raster.height / 2 - margin)
-                    else:
-                        sc.image(raster.dim_img, -raster.width / 2, -raster.height / 2)
+        content_h = self.tops[-1] + self.heights[-1]
+        top_fade, bottom_fade = edge_fades(self.scroll, content_h, h, EDGE_FADE)
+        # per-line edge fade: an alpha each, never a mask (an offscreen per paint)
+        for index in range(first, last + 1):
+            raster = self._raster(index, w - 2 * PAD_X)
+            if raster is None:
+                continue
+            scale, alpha, blur = DEPTH[line_depth(index, self.current)]
+            if index == self.hovered and index != self.current:
+                alpha = max(alpha, HOVER_ALPHA)
+                blur = min(blur, 1.0)
+            y = self.tops[index] - self.scroll
+            cx, cy = PAD_X + raster.width / 2, y + raster.height / 2
+            alpha *= max(0.0, min(1.0, cy / top_fade, (h - cy) / bottom_fade))
+            if alpha <= 0.01:
+                continue
+            with sc.group(cx, cy, scale, alpha):
+                if index == self.current and line:
+                    self._paint_current(sc, raster, self._word_alphas(now))
+                elif blur > 0 and (soft := self._blurred(raster, blur)) is not None:
+                    texture, margin = soft
+                    img = Image(texture, raster.width + 2 * margin, raster.height + 2 * margin)
+                    sc.image(img, -raster.width / 2 - margin, -raster.height / 2 - margin)
+                else:
+                    sc.image(raster.dim_img, -raster.width / 2, -raster.height / 2)
 
     def _paint_current(self, sc: Scene, raster: LineRaster, alphas: list[float]) -> None:
         """The current line: unsung words at 55%, each sung word brightening in place."""

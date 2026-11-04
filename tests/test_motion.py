@@ -1,6 +1,14 @@
 from itertools import pairwise
 
-from encorelib.motion import blob_center, ease_in_out, ease_out, grain_texture_bytes, lerp
+from encorelib.motion import (
+    FIELD_FPS,
+    blob_center,
+    ease_in_out,
+    ease_out,
+    field_rate,
+    grain_texture_bytes,
+    lerp,
+)
 
 
 def test_ease_out_is_monotonic_and_bounded():
@@ -44,3 +52,12 @@ def test_held_scale_caps():
     assert held_scale(0.1) == 1.0 and held_scale(0.3) == 1.0
     assert abs(held_scale(0.75) - 1.09) < 0.01
     assert held_scale(1.2) == 1.18 and held_scale(8.0) == 1.18
+
+
+def test_field_rate_holds_when_paused():
+    # the field drifts while music plays, or while nothing plays at all (the
+    # idle light); a paused track holds, with or without a cover
+    assert field_rate(playing=True, idle=False) == FIELD_FPS
+    assert field_rate(playing=False, idle=True) == FIELD_FPS
+    assert field_rate(playing=False, idle=False) == 0
+    assert FIELD_FPS >= 1
