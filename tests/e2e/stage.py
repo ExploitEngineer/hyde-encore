@@ -34,6 +34,7 @@ from harness import LIB, REPO, Harness, write_png
 from encorelib.look import update_look
 
 LAB = "encore-lab"
+LAB_CLASS = "org.hyde.encore.lab"  # the stage copy of the player window
 ARTIST, TITLE = "Rick Astley", "Never Gonna Give You Up"  # fake_mpris track 1
 # original lyrics, word-timed; glyph triggers and one CJK line on purpose
 LRC = """[00:02.00]<00:02.00>Neon <00:02.45>on <00:02.65>the <00:02.80>city <00:03.30>floor<00:03.90>
@@ -82,6 +83,13 @@ class Lab:
             return []
 
     @staticmethod
+    def monitor() -> dict:
+        for m in json.loads(hyprctl("monitors", "all", "-j") or "[]"):
+            if m["name"] == LAB:
+                return m
+        raise RuntimeError("lab monitor vanished")
+
+    @staticmethod
     def capture(path: Path) -> Path:
         subprocess.run(["grim", "-o", LAB, str(path)], check=True, timeout=10)
         return path
@@ -95,6 +103,44 @@ def default_cover(tmp: Path) -> Path:
     if covers:
         return Path(shutil.copy(covers[-1], tmp / "cover.png"))
     return write_png(tmp / "cover.png", 512, (190, 60, 120))
+
+
+def _lab_client() -> dict | None:
+    for client in json.loads(hyprctl("clients", "-j") or "[]"):
+        if client.get("class") == LAB_CLASS:
+            return client
+    return None
+
+
+def open_player(h: Harness, lab: Lab, start: str) -> tuple[int, int, int, int]:
+    """Open the player on the lab monitor; abort at once if it maps anywhere else."""
+    monitor = lab.monitor()
+    print(
+        "rule:",
+        hyprctl(
+            "eval",
+            'hl.window_rule({name = "encore_lab_player", '
+            'match = {class = "^org\\\\.hyde\\\\.encore\\\\.lab$"}, '
+            f'workspace = "{monitor["activeWorkspace"]["id"]} silent", '
+            'float = true, center = true, size = "960 660"})',
+        ),
+    )
+    h.env["ENCORE_PLAYER_APP_ID"] = LAB_CLASS
+    process = h._spawn(
+        [sys.executable, str(LIB / "encore.py"), "player", "--open", start], "player.log"
+    )
+    deadline = time.monotonic() + 8
+    while (client := _lab_client()) is None:
+        if time.monotonic() > deadline or process.poll() is not None:
+            raise RuntimeError("the stage player window never appeared")
+        time.sleep(0.05)
+    if client["monitor"] != monitor["id"]:
+        process.kill()
+        raise RuntimeError("the stage player mapped on the owner's screen; killed it")
+    time.sleep(1.5)  # art, fonts and the first poll
+    client = _lab_client() or client
+    (ax, ay), (aw, ah) = client["at"], client["size"]
+    return ax - monitor["x"], ay - monitor["y"], aw, ah
 
 
 def look_value(raw: str):
@@ -114,6 +160,7 @@ def main() -> int:
     parser.add_argument("--glow", action="store_true", help="also run the edge glow")
     parser.add_argument("--no-overlay", action="store_true", help="skip the lyrics overlay")
     parser.add_argument("--clip", type=float, default=0.0, help="record N seconds from 2.0")
+    parser.add_argument("--player", default="", help="open the player: player, lyrics, look, glow")
     parser.add_argument("--cover", default="", help="cover image (default: newest cached)")
     parser.add_argument("--ref", default="", help="reference frame for a side-by-side sheet")
     parser.add_argument("--out", default="", help="output dir (default .stage/<style>)")
@@ -141,6 +188,9 @@ def main() -> int:
             h._spawn(["bash", str(LIB / "encore.sh"), "overlay"], "overlay.log")
         if args.glow:
             h._spawn(["bash", str(LIB / "encore.sh"), "glow", "--run"], "glow.log")
+        player_box = None
+        if args.player:
+            player_box = open_player(h, lab, args.player)
         time.sleep(3.0)  # first frames, fonts and the art layer
         try:
             raw = json.loads(hyprctl("layers", "-j") or "{}")
@@ -163,6 +213,14 @@ def main() -> int:
             time.sleep(0.8)  # the overlay finishes its transition
             shots.append(lab.capture(out / f"{args.style}-{at:05.1f}.png"))
             print(shots[-1])
+            if player_box:
+                x, y, w, hh = player_box
+                crop = out / f"player-{args.player}-{at:05.1f}.png"
+                subprocess.run(
+                    ["magick", str(shots[-1]), "-crop", f"{w}x{hh}+{x}+{y}", "+repage", str(crop)],
+                    check=False,
+                )
+                print(crop)
 
         if args.clip:
             h.ctl("encoretest", "position", "2.0")
