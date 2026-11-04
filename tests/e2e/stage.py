@@ -11,6 +11,7 @@ plus an optional clip. Nothing shows on the owner's screen.
 Usage:
   python3 tests/e2e/stage.py --style stack --at 2.9,5.0,12.4 [--glow] [--clip 6]
       [--look size=40 --look motion=false] [--ref .reference/site/hero-1.png]
+  python3 tests/e2e/stage.py --no-overlay --app home [--relaunch] --cover cover.jpg --at 5.0
 Output goes to .stage/<style>/ (gitignored).
 """
 
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import signal
 import subprocess
@@ -33,8 +35,10 @@ from harness import LIB, REPO, Harness, write_png
 
 from encorelib.look import update_look
 
-LAB = "encore-lab"
-LAB_CLASS = "org.hyde.encore.lab"  # the stage copy of the player window
+# a fresh name per run: Hyprland moves a workspace back to the monitor it was
+# last on, so a reused name pulls one of the owner's workspaces onto the lab
+LAB = f"encore-lab-{os.getpid()}"
+LAB_CLASS = "org.hyde.encore.lab"  # the stage copy of the Encore window
 ARTIST, TITLE = "Rick Astley", "Never Gonna Give You Up"  # fake_mpris track 1
 # original lyrics, word-timed; glyph triggers and one CJK line on purpose
 LRC = """[00:02.00]<00:02.00>Neon <00:02.45>on <00:02.65>the <00:02.80>city <00:03.30>floor<00:03.90>
@@ -59,6 +63,7 @@ class Lab:
     def __enter__(self) -> Self:
         if LAB in self.names():
             hyprctl("output", "remove", LAB)
+        owners = {w["id"] for w in json.loads(hyprctl("workspaces", "-j") or "[]")}
         hyprctl("output", "create", "headless", LAB)
         deadline = time.monotonic() + 5
         while LAB not in self.names():
@@ -70,6 +75,10 @@ class Lab:
             f'hl.monitor({{output = "{LAB}", mode = "1920x1080@60", '
             f'position = "20000x20000", scale = 1}})',
         )
+        workspace = self.monitor()["activeWorkspace"]
+        if workspace["id"] in owners:  # never show or move the owner's windows
+            hyprctl("output", "remove", LAB)
+            raise RuntimeError(f"the lab monitor took workspace {workspace['name']!r}; removed it")
         return self
 
     def __exit__(self, *_exc) -> None:
@@ -112,8 +121,17 @@ def _lab_client() -> dict | None:
     return None
 
 
-def open_player(h: Harness, lab: Lab, start: str) -> tuple[int, int, int, int]:
-    """Open the player on the lab monitor; abort at once if it maps anywhere else."""
+def _lab_clients() -> list[dict]:
+    return [c for c in json.loads(hyprctl("clients", "-j") or "[]") if c.get("class") == LAB_CLASS]
+
+
+def launch_app(h: Harness, page: str, log: str = "app.log") -> subprocess.Popen:
+    h.env["ENCORE_APP_ID"] = LAB_CLASS
+    return h._spawn([sys.executable, str(LIB / "encore.py"), "app", "--open", page], log)
+
+
+def open_app(h: Harness, lab: Lab, page: str) -> tuple[int, int, int, int]:
+    """Open the Encore window on the lab monitor; abort at once if it maps anywhere else."""
     monitor = lab.monitor()
     print(
         "rule:",
@@ -122,21 +140,19 @@ def open_player(h: Harness, lab: Lab, start: str) -> tuple[int, int, int, int]:
             'hl.window_rule({name = "encore_lab_player", '
             'match = {class = "^org\\\\.hyde\\\\.encore\\\\.lab$"}, '
             f'workspace = "{monitor["activeWorkspace"]["id"]} silent", '
-            'float = true, center = true, size = "960 660"})',
+            'float = true, center = true, size = "960 660", '
+            'opacity = "1.0 override 1.0 override"})',
         ),
     )
-    h.env["ENCORE_PLAYER_APP_ID"] = LAB_CLASS
-    process = h._spawn(
-        [sys.executable, str(LIB / "encore.py"), "player", "--open", start], "player.log"
-    )
+    process = launch_app(h, page)
     deadline = time.monotonic() + 8
     while (client := _lab_client()) is None:
         if time.monotonic() > deadline or process.poll() is not None:
-            raise RuntimeError("the stage player window never appeared")
+            raise RuntimeError("the stage Encore window never appeared")
         time.sleep(0.05)
     if client["monitor"] != monitor["id"]:
         process.kill()
-        raise RuntimeError("the stage player mapped on the owner's screen; killed it")
+        raise RuntimeError("the stage Encore window mapped on the owner's screen; killed it")
     time.sleep(1.5)  # art, fonts and the first poll
     client = _lab_client() or client
     (ax, ay), (aw, ah) = client["at"], client["size"]
@@ -160,7 +176,10 @@ def main() -> int:
     parser.add_argument("--glow", action="store_true", help="also run the edge glow")
     parser.add_argument("--no-overlay", action="store_true", help="skip the lyrics overlay")
     parser.add_argument("--clip", type=float, default=0.0, help="record N seconds from 2.0")
-    parser.add_argument("--player", default="", help="open the player: player, lyrics, look, glow")
+    parser.add_argument("--app", default="", help="open the Encore window on a page: home, lyrics")
+    parser.add_argument(
+        "--relaunch", action="store_true", help="launch Encore a second time: one window must stay"
+    )
     parser.add_argument("--cover", default="", help="cover image (default: newest cached)")
     parser.add_argument("--ref", default="", help="reference frame for a side-by-side sheet")
     parser.add_argument("--out", default="", help="output dir (default .stage/<style>)")
@@ -189,8 +208,15 @@ def main() -> int:
         if args.glow:
             h._spawn(["bash", str(LIB / "encore.sh"), "glow", "--run"], "glow.log")
         player_box = None
-        if args.player:
-            player_box = open_player(h, lab, args.player)
+        if args.app:
+            player_box = open_app(h, lab, args.app)
+            if args.relaunch:
+                second = launch_app(h, args.app, "app-second.log")
+                code = second.wait(10)
+                windows = len(_lab_clients())
+                print(f"relaunch: second launch exited {code}, {windows} Encore window(s)")
+                if code != 0 or windows != 1:
+                    raise RuntimeError("a second launch must leave exactly one window")
         time.sleep(3.0)  # first frames, fonts and the art layer
         try:
             # where each encore surface really landed, and how big it is
@@ -215,7 +241,7 @@ def main() -> int:
             print(shots[-1])
             if player_box:
                 x, y, w, hh = player_box
-                crop = out / f"player-{args.player}-{at:05.1f}.png"
+                crop = out / f"app-{args.app}-{at:05.1f}.png"
                 subprocess.run(
                     ["magick", str(shots[-1]), "-crop", f"{w}x{hh}+{x}+{y}", "+repage", str(crop)],
                     check=False,
@@ -239,7 +265,7 @@ def main() -> int:
         logs = out / "logs"
         shutil.rmtree(logs, ignore_errors=True)
         shutil.copytree(h.tmp / "logs", logs)
-        for name in ("overlay.log", "glow.log"):
+        for name in ("overlay.log", "glow.log", "app.log"):
             text = h.log(name)
             if "Traceback" in text or "CRITICAL" in text:
                 print(f"--- {name}\n{text[-1500:]}", file=sys.stderr)

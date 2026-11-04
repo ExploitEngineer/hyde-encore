@@ -18,7 +18,12 @@ def gtk():
 
 def bounds(node):
     b = node.get_bounds()
-    return round(b.get_x(), 3), round(b.get_y(), 3), round(b.get_width(), 3), round(b.get_height(), 3)
+    return (
+        round(b.get_x(), 3),
+        round(b.get_y(), 3),
+        round(b.get_width(), 3),
+        round(b.get_height(), 3),
+    )
 
 
 def test_rounded_clip_keeps_its_rect(gtk):

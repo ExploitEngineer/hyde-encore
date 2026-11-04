@@ -36,12 +36,21 @@ Requirements: HyDE, `python-gobject`, `playerctl`, `imagemagick` (all present on
 for f in encore.py encore.sh encorelib encoregui; do
   ln -s "$PWD/Configs/.local/lib/hyde/$f" ~/.local/lib/hyde/$f
 done
+# "Encore" in the app launcher, with its icon
+mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/scalable/apps
+ln -s "$PWD/Configs/.local/share/applications/org.hyde.encore.desktop" ~/.local/share/applications/
+ln -s "$PWD/Configs/.local/share/icons/hicolor/scalable/apps/org.hyde.encore.svg" \
+  ~/.local/share/icons/hicolor/scalable/apps/
 # copy, not link: hyprlock.sh does not follow symlinked layouts
 cp Configs/.config/hypr/hyprlock/Encore.conf ~/.config/hypr/hyprlock/Encore.conf
+```
 
-hyde-shell encore daemon          # run in a terminal, play a song
-hyde-shell encore toggle          # lyrics overlay on or off
-hyde-shell encore menu            # player window
+Then open **Encore** from the app launcher, like any app.
+From a terminal the same commands are:
+
+```sh
+hyde-shell encore app             # the Encore window (again: brings it forward)
+hyde-shell encore toggle          # lyrics on the desktop, on or off
 hyde-shell hyprlock.sh --select   # pick the "Encore" lock screen layout
 ```
 

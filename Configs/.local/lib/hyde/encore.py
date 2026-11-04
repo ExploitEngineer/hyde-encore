@@ -74,7 +74,6 @@ LOOK_STATE = state_look_path()  # the look kept across reboots
 FOLLOW_PATH = RUNTIME_DIR / "encore.follow"  # a player the user picked by hand
 GLOW_PIDFILE = RUNTIME_DIR / "encore-glow.pid"
 LOOKUPS_PATH = RUNTIME_DIR / "encore.lookups"  # the last 50 lyric lookups
-PLAYER_PIDFILE = RUNTIME_DIR / "encore-player.pid"
 COVER_PATH = RUNTIME_DIR / "encore.cover.png"  # album art for hyprlock
 RUNTIME_FILES = (HYPRLOCK_PATH, TRACK_PATH, COVER_PATH)
 CACHE_DIR = xdg_cache_home() / "hyde" / "encore"
@@ -625,11 +624,15 @@ def run_glow_toggle() -> int:
     return 0
 
 
-def run_player_cmd(start: str = "player") -> int:
-    from encoregui.player import run_player
+APP_PAGES = ("home", "lyrics")
+
+
+def run_app_cmd(page: str | None = None) -> int:
+    """Open the Encore window, or bring it forward (on `page` when given)."""
+    from encoregui.app import run_app
 
     ensure_daemon()
-    return run_player(str(RUNTIME_DIR), str(PLAYER_PIDFILE), start)
+    return run_app(str(RUNTIME_DIR), page)
 
 
 def _ensure(pidfile: Path, command: list[str], want_on: bool) -> None:
@@ -927,15 +930,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     look.add_argument("key", help="font | size | color | next-line | motion | reset")
     look.add_argument("value", nargs="?", default="", help="new value ('auto' for color resets it)")
-    menu = sub.add_parser("menu", help="open the encore player window")
+    app = sub.add_parser("app", help="open Encore, or bring its window forward")
+    app.add_argument("--open", choices=APP_PAGES, default=None, help="show this page of the window")
+    menu = sub.add_parser("menu", help="open Encore (same as 'app')")
     menu.add_argument("--rofi", action="store_true", help="use the compact rofi menu instead")
-    player = sub.add_parser("player", help="open the encore player window")
-    player.add_argument(
-        "--open",
-        choices=("player", "lyrics", "look", "glow"),
-        default="player",
-        help="start in lyrics view, or with the look menu or glow settings open",
-    )
+    player = sub.add_parser("player", help="open Encore (same as 'app')")
+    player.add_argument("--open", choices=("player", *APP_PAGES), default=None)
     profile = sub.add_parser("profile", help="apply a sound setup: working or show")
     profile.add_argument("name", help="working | show")
     sub.add_parser("show", help="toggle the show workspace (full show on an empty stage)")
@@ -958,10 +958,12 @@ def main(argv: list[str] | None = None) -> int:
         return run_style(args.name)
     if args.command == "look":
         return run_look(args.key, args.value)
+    if args.command == "app":
+        return run_app_cmd(args.open)
     if args.command == "menu":
-        return run_menu() if args.rofi else run_player_cmd()
+        return run_menu() if args.rofi else run_app_cmd()
     if args.command == "player":
-        return run_player_cmd(args.open)
+        return run_app_cmd("home" if args.open == "player" else args.open)
     if args.command == "profile":
         return run_profile(args.name)
     if args.command == "show":
