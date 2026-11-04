@@ -91,7 +91,7 @@ type = "string"
 
 [properties.encore.properties.overlay.properties.style]
 default = "line"
-description = "Overlay style: line (karaoke strip), stack (big centered words) or constellation (scattered word map)."
+description = "Overlay style: line (karaoke strip), stack (rolling word column), constellation (word chain) or visual (album art with the rolling column)."
 type = "string"
 
 [properties.encore.properties.hyprlock]

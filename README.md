@@ -81,7 +81,7 @@ dim = ""                # unsung words; empty uses album text at 50%
 
 [encore.overlay]
 enable = false          # start the overlay with the service
-style = "line"          # line, stack or constellation
+style = "line"          # line, stack, constellation or visual
 position = "bottom"     # top, center or bottom
 margin = 120
 font = "SF Pro Display, Inter, Cantarell, sans-serif"

@@ -20,6 +20,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 
 from encorelib.look import MAX_SIZE, MIN_SIZE, read_look, update_look
+from encorelib.lyricview import lyric_row, lyric_rows
 from encorelib.palette import pick_accent
 from encorelib.protocol import read_state
 from encorelib.single import claim, pid_alive, read_pid, release
@@ -791,7 +792,7 @@ class Player(Gtk.ApplicationWindow):
                 self.lyric_box.remove(child)
                 child = nxt
             self.lyric_rows = []
-            texts = [ln.get("text", "") for ln in lines if ln.get("text")]
+            texts = lyric_rows(lines)
             if not texts:
                 texts = ["No synced lyrics for this track"]
             for text in texts:
@@ -802,12 +803,7 @@ class Player(Gtk.ApplicationWindow):
                 self.lyric_box.append(label)
                 self.lyric_rows.append(label)
             self.current_line = -1
-        line = state.get("line") or {}
-        index = line.get("index", -1)
-        if lines and 0 <= index < len(lines):
-            # map line index (which counts empty gap lines) to text rows
-            texts_before = sum(1 for ln in lines[: index + 1] if ln.get("text")) - 1
-            index = max(0, texts_before)
+        index = lyric_row(state)
         if index != self.current_line and self.lyric_rows:
             self.current_line = index
             for i, row in enumerate(self.lyric_rows):

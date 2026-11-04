@@ -1,6 +1,6 @@
 import pytest
 
-from encorelib.clock import PlaybackClock
+from encorelib.clock import PlaybackClock, clean_rate
 
 
 class FakeTime:
@@ -57,3 +57,25 @@ def test_starts_stopped_at_zero(now):
     now.t += 3
     assert clock.position() == 0.0
     assert clock.playing is False
+
+
+def test_clean_rate():
+    assert clean_rate(1.5) == 1.5
+    assert clean_rate(0.5) == 0.5
+    for bad in (0, -1, float("nan"), float("inf"), 9, "x", None):
+        assert clean_rate(bad) == 1.0
+
+
+def test_sync_keeps_rate_when_omitted(now):
+    clock = PlaybackClock(now)
+    clock.sync(10.0, True, 1.5)
+    clock.sync(10.0, True)  # a resync that does not know the rate
+    now.t += 2.0
+    assert clock.rate == 1.5
+    assert clock.position() == pytest.approx(13.0)
+
+
+def test_sync_cleans_bad_rate(now):
+    clock = PlaybackClock(now)
+    clock.sync(10.0, True, 0.0)
+    assert clock.rate == 1.0

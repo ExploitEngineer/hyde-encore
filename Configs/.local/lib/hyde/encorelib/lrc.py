@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from .model import Line, Lyrics, Word
+from .words import is_cjk
 
 LAST_LINE_SECONDS = 5.0
 
@@ -19,21 +20,39 @@ def _seconds(minutes: str, seconds: str) -> float:
 
 
 def _parse_words(body: str, shift: float) -> tuple[list[tuple[str, float]], float | None]:
-    """Split an enhanced LRC body into (text, start) tokens.
+    """Split an enhanced LRC body into (word, start) tokens.
 
+    Tags inside a word (syllable timing, `<t>Hel<t>lo`) merge into one word
+    that starts at the first syllable; CJK characters stay separate words.
     Returns the tokens and the time of a trailing closing tag, if any.
     """
     marks = list(_WORD_TAG.finditer(body))
     tokens: list[tuple[str, float]] = []
     closing: float | None = None
+    glued = False  # the previous token ran straight into this tag
     for i, m in enumerate(marks):
         start = _seconds(m.group(1), m.group(2)) - shift
         stop = marks[i + 1].start() if i + 1 < len(marks) else len(body)
-        text = body[m.end() : stop].strip()
+        raw = body[m.end() : stop]
+        text = raw.strip()
         if text:
-            tokens.append((text, start))
-        elif i == len(marks) - 1:
-            closing = start
+            merge = (
+                tokens
+                and glued
+                and not raw[0].isspace()
+                and not is_cjk(tokens[-1][0][-1])
+                and not is_cjk(text[0])
+            )
+            if merge:
+                tokens[-1] = (tokens[-1][0] + text, tokens[-1][1])
+            else:
+                tokens.append((text, start))
+            glued = not raw[-1].isspace()
+        else:
+            if raw:
+                glued = False  # only whitespace between two tags: a word break
+            if i == len(marks) - 1:
+                closing = start
     return tokens, closing
 
 
@@ -83,7 +102,7 @@ def parse_lrc(text: str, source: str = "lrc") -> Lyrics:
                 built.append(Word(wtext, wstart, wend))
             words = tuple(built)
             has_words = has_words or bool(words)
-            body = " ".join(w.text for w in words)
+            body = " ".join(_WORD_TAG.sub("", body).split())
         lines.append(Line(start=start, end=end, text=body.strip(), words=words))
 
     return Lyrics(lines=tuple(lines), sync="word" if has_words else "line", source=source)

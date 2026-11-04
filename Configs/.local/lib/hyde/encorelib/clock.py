@@ -2,8 +2,26 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
+
+MAX_RATE = 8.0
+
+
+def clean_rate(value: object) -> float:
+    """A usable playback rate from an MPRIS Rate value, else 1.0.
+
+    MPRIS forbids 0 (pause is a status, not a rate) and encore cannot sing
+    backwards, so zero, negative, non-finite and absurd values become 1.0.
+    """
+    try:
+        rate = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 1.0
+    if not math.isfinite(rate) or rate <= 0 or rate > MAX_RATE:
+        return 1.0
+    return rate
 
 
 class PlaybackClock:
@@ -16,11 +34,13 @@ class PlaybackClock:
         self.playing = False
         self.rate = 1.0
 
-    def sync(self, position: float, playing: bool, rate: float = 1.0) -> None:
+    def sync(self, position: float, playing: bool, rate: float | None = None) -> None:
+        """Re-anchor on the player's position; rate=None keeps the current rate."""
         self._position = position
         self._ts = self._now()
         self.playing = playing
-        self.rate = rate
+        if rate is not None:
+            self.rate = clean_rate(rate)
 
     def position(self) -> float:
         if not self.playing:

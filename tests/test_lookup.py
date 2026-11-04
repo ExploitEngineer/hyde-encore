@@ -4,7 +4,7 @@ from conftest import FIXTURES
 
 from encorelib.cache import LyricsCache
 from encorelib.config import EncoreConfig
-from encorelib.lookup import lookup_lyrics
+from encorelib.lookup import cache_key, lookup_lyrics
 from encorelib.providers import NotFound, ProviderError, TrackInfo
 
 SPOTIFY_ID = "4uLU6hMCjMI75M1A2tKUQC"
@@ -95,3 +95,16 @@ def test_unwritable_cache_still_returns_lyrics(tmp_path):
     blocker.write_text("not a directory")
     fetch = Fetch((FIXTURES / "lrclib_get.json").read_bytes())
     assert lookup_lyrics(TRACK, cfg(tmp_path), LyricsCache(blocker), fetch).source == "lrclib"
+
+
+def test_cache_key_has_version(tmp_path):
+    assert cache_key(TRACK, cfg(tmp_path)).endswith("-v2")
+
+
+def test_v1_cache_entries_are_refetched(tmp_path):
+    cache = LyricsCache(tmp_path / "cache")
+    v1_key = cache_key(TRACK, cfg(tmp_path)).removesuffix("-v2")
+    cache.put(v1_key, None)  # an old "no lyrics" answer under the v1 key
+    fetch = Fetch(NotFound("x"))
+    lookup_lyrics(TRACK, cfg(tmp_path), cache, fetch)
+    assert fetch.calls > 0
