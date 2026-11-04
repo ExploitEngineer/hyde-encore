@@ -31,10 +31,10 @@ Goal: match, then beat, the reference apps Verci and Lumn, then upstream PRs to 
 - `Configs/.local/lib/hyde/encorelib/`: pure logic, unit-tested, no `gi`.
   Look: colors (album scheme), glowfield (glow geometry).
   Engine: model, lrc, words (CJK-aware tokens), timing, clock, providers, query (LRCLIB search variants), lookup, cache, palette, protocol, session, config, service (find or start the daemon).
-  Daemon support: jobs (latest-wins workers).
+  Daemon support: jobs (latest-wins workers), journal (lookup log).
   View logic: look (runtime look file), profiles, stream (socket decoding, style list), lyricview, wordrects, constellation, glyphs, single (pidfile lock).
 - `Configs/.local/lib/hyde/encore.py`: GLib/Playerctl daemon and CLI; `encore.sh` is the hyde-shell entry (sets LD_PRELOAD for `overlay` and `glow`).
-- `Configs/.local/lib/hyde/encoregui/`: GTK4 processes, each separate from the daemon: `overlay.py` (layer-shell lyrics, plus the visual-style art layer), `glow.py` (one full-screen edge-glow window), `player.py` (normal app window `org.hyde.encore.player` with the look menu and glow popover).
+- `Configs/.local/lib/hyde/encoregui/`: GTK4 processes, each separate from the daemon: `overlay.py` (layer-shell lyrics drawn as GPU render nodes through `scene.py`, plus the visual-style art layer), `glow.py` (one full-screen edge-glow window), `player.py` (normal app window `org.hyde.encore.player` with the look menu and glow popover).
 - Runtime dir `$XDG_RUNTIME_DIR/hyde/`: `encore.sock` (state), `encore.look` (live look and glow keys), pidfiles, hyprlock line, track and cover files.
 - State protocol: JSON lines on `encore.sock`, schema in `docs/superpowers/plans/2026-11-03-encore-core.md`.
 - Upstream fragments hold only encore's additions, to merge into HyDE's files: `Configs/.local/share/hyde/schema/*.toml` and `Configs/.local/share/hypr/lua/{variables,start_up,key_binds,window_rules}.encore.lua`.

@@ -34,7 +34,7 @@ System `python3` has `python-gobject`, `playerctl` and `gtk4-layer-shell` typeli
 encore starts like HyDE's other services: `hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-encore.service -t service -- encore.sh daemon --if-enabled`.
 The daemon exits at once unless `[encore] enable = true`, so the entry can ship enabled-by-config without starting anything by default.
 
-## 10. 2026-11-04 - Overlay renders with the cairo GSK renderer and cached line rasters - Active
+## 10. 2026-11-04 - Overlay renders with the cairo GSK renderer and cached line rasters - Superseded by #28
 Measured on the owner's laptop at a steady 60 fps fill: cairo 6.8%, vulkan 11.8%, gl 15.0% of one core; cached dim/bright surfaces then halve the python cost.
 Animation runs on a 30 fps GLib timer because an active GTK tick callback forces the full frame cycle at 60 Hz; the feathered fill edge hides the half rate.
 
@@ -116,4 +116,10 @@ GTK replays the cairo drawing at render time, so the Python profiler cannot see 
 Shrinking the canvas width to the line's widest word did not help (painting, not canvas area, dominates), and frame-skipping slides gave no measurable gain on a loaded machine.
 A prototype that draws word textures through snapshot texture nodes and lets the renderer scale them cost 20% (NGL) against 70% (cairo) in a worst case of four giant words rescaled every frame; NGL alone carries a high per-frame cost on this NVIDIA setup, so the switch only pays once the whole overlay draws texture nodes.
 Perf numbers need a quiet machine: with a browser video, Hyprland and a build running, runs varied by 3-4 points.
+
+## 28. 2026-11-04 - Overlay frames are GPU render nodes; CPU is now the frame pipeline, not painting - Active
+`encoregui/scene.py` turns every frame into snapshot nodes (textures, transforms, opacity, clips, an alpha-mask feather, GPU shadows); cairo and Pango only rasterise text once into cached textures, and the overlay runs on GTK's default renderer.
+Gains: big words scale with mipmapped filtering and only ever downward (crisp slides), and shadows are GPU blurs.
+An interleaved A/B on identical code and load (stack, dense lyrics, browser video running) measured cairo 17.5-20.0% against NGL 17.3-18.3% of a core, so the port is cost-neutral rather than the 4x the worst-case prototype suggested: painting is no longer the cost, and what remains is per-frame Python, GTK's frame cycle and the Wayland commit.
+Finding the next cut needs a native profiler (perf or sysprof), which is not installed.
 
