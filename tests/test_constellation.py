@@ -1,7 +1,7 @@
 import itertools
 import math
 
-from encorelib.constellation import place_words, sparkles
+from encorelib.constellation import chain_words, place_words, sparkles
 
 WORDS = ["We're", "no", "strangers", "to", "love", "you", "know", "the", "rules"]
 
@@ -61,7 +61,16 @@ def test_chain_words_deterministic_and_stepped():
     import math
 
     steps = [math.hypot(b[0] - c[0], b[1] - c[1]) for b, c in itertools.pairwise(a)]
-    assert all(70 <= s <= 240 for s in steps)  # near the previous word, never on it
+    # near the previous word, never on it; steps scale with the screen height
+    assert all(1080 * 0.105 <= s <= 1080 * 0.27 for s in steps), steps
+
+
+def test_chain_steps_scale_with_the_screen():
+    import math
+
+    big = chain_words(WORDS, 3840, 2160, seed="k1")
+    steps = [math.hypot(b[0] - c[0], b[1] - c[1]) for b, c in itertools.pairwise(big)]
+    assert min(steps) >= 2160 * 0.105
 
 
 def test_chain_words_stay_in_center_band():
@@ -71,3 +80,16 @@ def test_chain_words_stay_in_center_band():
     for x, y in pos:
         assert 1920 * 0.12 <= x <= 1920 * 0.88
         assert 1080 * 0.2 <= y <= 1080 * 0.8
+
+
+def test_chain_is_centered_on_screen():
+    for seed in ("a", "line 2", "line 3", "x9"):
+        pts = chain_words(["w"] * 6, 1920, 1080, seed=seed)
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        assert abs((min(xs) + max(xs)) / 2 - 960) < 60
+        assert abs((min(ys) + max(ys)) / 2 - 540) < 60
+
+
+def test_short_line_is_centered_too():
+    pts = chain_words(["only", "two"], 1920, 1080, seed="short")
+    assert abs((pts[0][0] + pts[1][0]) / 2 - 960) < 60

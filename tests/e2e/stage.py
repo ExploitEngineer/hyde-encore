@@ -141,7 +141,20 @@ def main() -> int:
             h._spawn(["bash", str(LIB / "encore.sh"), "overlay"], "overlay.log")
         if args.glow:
             h._spawn(["bash", str(LIB / "encore.sh"), "glow", "--run"], "glow.log")
-        time.sleep(2.0)  # first frames, fonts and the art layer
+        time.sleep(3.0)  # first frames, fonts and the art layer
+        try:
+            raw = json.loads(hyprctl("layers", "-j") or "{}")
+            layers = raw.get(LAB, {}).get("levels", {})
+            print("layer monitors:", list(raw), flush=True)
+            for level, items in sorted(layers.items()):
+                for layer in items:
+                    if "encore" in layer["namespace"]:
+                        print(
+                            f"layer {layer['namespace']} level {level}: "
+                            f"{layer['x']},{layer['y']} {layer['w']}x{layer['h']}"
+                        )
+        except ValueError:
+            pass
 
         shots = []
         for at in [float(x) for x in args.at.split(",") if x]:

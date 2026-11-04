@@ -28,6 +28,8 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
 from encoregui.outputs import find_monitor, place_on
+from encorelib.colors import scheme as color_scheme
+from encorelib.colors import text_on
 from encorelib.config import EncoreConfig
 from encorelib.constellation import chain_words
 from encorelib.glyphs import glyph_for
@@ -41,7 +43,7 @@ from encorelib.lyricview import (
     next_word_boundary,
     should_transition,
 )
-from encorelib.palette import pick_accent
+from encorelib.palette import wallpaper_palette
 from encorelib.stream import LineDecoder, should_connect
 from encorelib.wordrects import word_byte_ranges
 
@@ -82,6 +84,8 @@ class LineRaster:
         width: int,
         accent: tuple[float, float, float],
         scale: int,
+        rest: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        rest_alpha: float = 0.42,
     ):
         self.scale = scale
         layout_width = width * Pango.SCALE
@@ -91,15 +95,20 @@ class LineRaster:
         desc = Pango.FontDescription.from_string(f"{font} Bold")
         desc.set_absolute_size(size * Pango.SCALE)
         layout.set_font_description(desc)
+        # display type sits a little tighter than text type
+        attrs = Pango.AttrList()
+        attrs.insert(Pango.attr_letter_spacing_new(int(-0.012 * size * Pango.SCALE)))
+        layout.set_attributes(attrs)
         layout.set_width(layout_width)
         layout.set_wrap(Pango.WrapMode.WORD)
         layout.set_alignment(Pango.Alignment.CENTER)
         layout.set_text(text, -1)
         _, logical = layout.get_pixel_extents()
-        self.height = logical.height + 10  # room for the baked shadow
+        self.pad = max(6, size // 5)  # room for the baked shadow and bloom
+        self.height = logical.height + 2 * self.pad
         self.width = width
         self.rects = self._word_rects(layout, text, words)
-        self.dim = self._render(layout, (1, 1, 1), 0.42, glow=None)
+        self.dim = self._render(layout, rest, rest_alpha, glow=None)
         self.bright = self._render(layout, accent, 1.0, glow=accent)
 
     @staticmethod
@@ -146,25 +155,32 @@ class LineRaster:
         )
         surface.set_device_scale(self.scale, self.scale)
         cr = cairo.Context(surface)
-        # shadow: a soft dark copy under everything, so text reads on light windows
+        cr.translate(0, self.pad)
+        # soft drop shadow: rings of faint offset copies approximate a blur,
+        # baked once per line so text reads on light windows without a halo
         cr.save()
-        cr.translate(0, 2)
         PangoCairo.layout_path(cr, layout)
-        cr.set_source_rgba(0, 0, 0, 0.30)
-        cr.set_line_width(3.0)
-        cr.stroke_preserve()
-        cr.set_source_rgba(0, 0, 0, 0.55)
-        cr.fill()
+        path = cr.copy_path()
+        cr.new_path()
+        for radius, a in ((5.0, 0.05), (3.4, 0.07), (2.0, 0.1), (0.9, 0.14)):
+            for k in range(8):
+                ang = k * math.pi / 4
+                cr.save()
+                cr.translate(radius * math.cos(ang), 2.2 + radius * math.sin(ang))
+                cr.append_path(path)
+                cr.set_source_rgba(0, 0, 0, a)
+                cr.fill()
+                cr.restore()
         cr.restore()
         if glow is not None:
+            # bloom: wide, faint strokes in the accent around sung words
             cr.save()
             PangoCairo.layout_path(cr, layout)
-            cr.set_source_rgba(*glow, 0.16)
-            cr.set_line_width(7.0)
-            cr.stroke_preserve()
-            cr.set_source_rgba(*glow, 0.28)
-            cr.set_line_width(3.5)
-            cr.stroke()
+            for width, a in ((12.0, 0.05), (7.0, 0.08), (3.5, 0.14)):
+                cr.set_source_rgba(*glow, a)
+                cr.set_line_width(width)
+                cr.stroke_preserve()
+            cr.new_path()
             cr.restore()
         cr.set_source_rgba(*rgb, alpha)
         cr.move_to(0, 0)
@@ -205,6 +221,7 @@ class Overlay:
         self.places: dict[tuple, list[tuple[float, float]]] = {}
         self.decoder = LineDecoder()
         self.accent_rgb: tuple[float, float, float] = (1.0, 1.0, 1.0)
+        self.colors = color_scheme({}, wallpaper_palette())
         self._accent_palette: dict | None = None
         self.credit_track = ""
         self.credit_until = 0.0
@@ -307,8 +324,9 @@ class Overlay:
         self._layout_stage()
         # room for two wrapped rows of the main and next lines plus the
         # credit; the surface is transparent, so the slack is invisible
-        small = max(12, int(self.size * 0.55))
-        height = int(self.size * 4.6 + small * 5.6 + 56)
+        line = self._line_px()
+        small = max(12, int(line * 0.6))
+        height = int(line * 4.6 + small * 5.6 + 56 + line)
         self.window.set_default_size(self.content_width, height)
 
     def _layout_stage(self) -> None:
@@ -358,12 +376,23 @@ class Overlay:
         cr.get_source().set_filter(cairo.FILTER_GOOD)
         cr.paint()
         cr.identity_matrix()
-        # dim + vignette baked in once, so frames never recompute a gradient
-        cr.set_source_rgba(0, 0, 0, 0.30)
+        # baked once per cover, so frames never recompute it: a deep dim, an
+        # album-accent soft-light wash (art and type read as one piece), a
+        # dark pool where the word column sits, then the vignette
+        cr.set_source_rgba(0, 0, 0, 0.42)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_SOFT_LIGHT)
+        cr.set_source_rgba(*_hex_rgb(self.colors.accent), 0.55)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        pool = cairo.RadialGradient(w / 2, h * 0.47, 0, w / 2, h * 0.47, h * 0.55)
+        pool.add_color_stop_rgba(0, 0, 0, 0, 0.45)
+        pool.add_color_stop_rgba(1, 0, 0, 0, 0)
+        cr.set_source(pool)
         cr.paint()
         vignette = cairo.RadialGradient(w / 2, h / 2, h * 0.32, w / 2, h / 2, h * 0.95)
         vignette.add_color_stop_rgba(0, 0, 0, 0, 0)
-        vignette.add_color_stop_rgba(1, 0, 0, 0, 0.62)
+        vignette.add_color_stop_rgba(1, 0, 0, 0, 0.7)
         cr.set_source(vignette)
         cr.paint()
         out.flush()
@@ -488,12 +517,13 @@ class Overlay:
         now = time.monotonic()
         palette = (self.state or {}).get("palette") or {}
         if palette != self._accent_palette:
-            # pick_accent scans the palette; run it only when the palette changes
+            # the scheme scans the palette; rebuild it only when the palette changes
             self._accent_palette = palette
+            self.colors = color_scheme(palette, wallpaper_palette())
             if self.color_override:
                 self.accent_rgb = _hex_rgb(self.color_override)
             else:
-                self.accent_rgb = _hex_rgb(pick_accent(palette))
+                self.accent_rgb = _hex_rgb(self.colors.accent)
         view = build_view(self.state, now)
         if should_transition(self.view.line_key, view.line_key) and self.view.visible:
             raster = self._raster_for(self.view)
@@ -635,28 +665,36 @@ class Overlay:
     def _raster_for(self, view: View) -> LineRaster | None:
         if not view.visible:
             return None
-        key = (view.line_key, self.size, self._accent())
+        rest = _hex_rgb(self.look_cache.get("lyric_color", self.colors.lyric))
+        key = (view.line_key, self.size, self._accent(), rest)
         raster = self.rasters.get(key)
         if raster is None:
             raster = LineRaster(
                 view.text,
                 [w for w, _ in view.words],
                 self.font,
-                self.size,
+                self._line_px(),
                 self.content_width,
                 self._accent(),
                 self.area.get_scale_factor() or 1,
+                rest=rest,
+                rest_alpha=0.6,
             )
             self.rasters[key] = raster
             while len(self.rasters) > RASTER_CACHE:
                 self.rasters.pop(next(iter(self.rasters)))
         return raster
 
+    def _line_px(self) -> int:
+        """Line type size: ~4% of the screen height at the default size 30."""
+        return max(16, round(getattr(self, "screen_h", 1080) * 0.040 * self.size / 30))
+
     def _small_raster(self, text: str, alpha_key: str) -> LineRaster | None:
         if not text:
             return None
-        size = max(12, int(self.size * 0.55))
-        key = (text, size, alpha_key)
+        size = max(12, int(self._line_px() * 0.6))
+        tint = _hex_rgb(self.look_cache.get("secondary_color", self.colors.secondary))
+        key = (text, size, alpha_key, tint)
         raster = self.small.get(key)
         if raster is None:
             raster = LineRaster(
@@ -667,6 +705,8 @@ class Overlay:
                 self.content_width,
                 (1, 1, 1),
                 self.area.get_scale_factor() or 1,
+                rest=tint,
+                rest_alpha=0.75,
             )
             self.small[key] = raster
             while len(self.small) > RASTER_CACHE:
@@ -827,23 +867,17 @@ class Overlay:
         return (hash((line_key, "x", index)) % 1000 / 1000 - 0.5) * width * 0.05
 
     def _trio(self) -> tuple[tuple, tuple, tuple]:
-        """(lyric, highlight, secondary) colors: look overrides, else album."""
+        """(lyric, highlight, secondary) colors: look overrides, else the album scheme."""
         look = self.look_cache
-        accent = self.accent_rgb
-
-        def mix(rgb, other, t):
-            return tuple(a * (1 - t) + b * t for a, b in zip(rgb, other))
-
-        lyric = (
-            _hex_rgb(look["lyric_color"]) if "lyric_color" in look else mix(accent, (1, 1, 1), 0.45)
-        )
-        highlight = _hex_rgb(look["highlight_color"]) if "highlight_color" in look else accent
-        secondary = (
-            _hex_rgb(look["secondary_color"])
-            if "secondary_color" in look
-            else mix(accent, (0.55, 0.55, 0.6), 0.55)
-        )
+        colors = self.colors
+        lyric = _hex_rgb(look.get("lyric_color", colors.lyric))
+        highlight = _hex_rgb(look.get("highlight_color", colors.highlight))
+        secondary = _hex_rgb(look.get("secondary_color", colors.secondary))
         return lyric, highlight, secondary
+
+    def _on_highlight(self) -> tuple:
+        block = self.look_cache.get("highlight_color", "#" + self.colors.highlight)
+        return _hex_rgb(text_on(block.lstrip("#")))
 
     def _column_base(self, height: int) -> float:
         """Column font unit: ~8% of the screen height at the default size,
@@ -902,9 +936,10 @@ class Overlay:
             shear = -0.10 * (target_slot - 1)
             current = i == ix
             if current and visual:
-                rgb, dim = (1, 1, 1), False
+                rgb, dim = self._on_highlight(), False
             elif current:
-                rgb, dim = highlight, False
+                # the highlight is a block fill; bare words need the readable accent
+                rgb, dim = self.accent_rgb, False
             elif slot >= 1.6:
                 rgb, dim = secondary, True
             else:
@@ -964,24 +999,30 @@ class Overlay:
 
     def _draw_cluster(self, cr, width, height, line_key, texts, ix, now, fade=1.0):
         positions = self._positions(line_key, texts, width, height)
-        cr.set_line_width(1.0)
-        cr.set_source_rgba(1, 1, 1, 0.14 * fade)
+        unit = self._line_px() * 1.3  # the sung word; ~54 px at 1080p and size 30
+        lyric, _highlight, secondary = self._trio()
+        accent = self.accent_rgb
+        # hairlines in the accent, brighter toward the newest word
+        cr.set_line_width(1.4)
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
         for i in range(min(ix, len(positions) - 1)):
+            age = ix - 1 - i
+            cr.set_source_rgba(*accent, max(0.12, 0.42 - 0.07 * age) * fade)
             cr.move_to(*positions[i])
             cr.line_to(*positions[i + 1])
             cr.stroke()
-        spark, sw, sh = self._word_surface("✦", max(10, self.size // 2 - 4), (1, 1, 1), True)
-        past = max(12, int(self.size * PAST_SCALE))
+        spark, sw, sh = self._word_surface("✦", max(10, int(unit * 0.26)), accent, False)
+        past = max(14, int(unit * 0.44))
         for i in range(ix):
             dx, dy = self._drift(now, i)
             x, y = positions[i][0] + dx, positions[i][1] + dy
-            self._paint_word(cr, spark, sw, sh, x, y - self.size * 0.7, 0.45 * fade)
-            surface, w, h = self._word_surface(texts[i], past, (1, 1, 1), True)
-            self._paint_word(cr, surface, w, h, x, y, 0.8 * fade)
+            self._paint_word(cr, spark, sw, sh, x, y - past * 1.05, 0.55 * fade)
+            older = ix - 1 - i
+            rgb = lyric if older < 2 else secondary
+            surface, w, h = self._word_surface(texts[i], past, rgb, older >= 2)
+            self._paint_word(cr, surface, w, h, x, y, max(0.45, 0.95 - 0.1 * older) * fade)
         if 0 <= ix < len(positions):
-            surface, w, h = self._word_surface(
-                texts[ix], int(self.size * CONSTELLATION_SCALE), self.accent_rgb, False
-            )
+            surface, w, h = self._word_surface(texts[ix], int(unit), accent, False)
             alpha, zoom = self._pop(now)
             dx, dy = self._drift(now, ix, 1.6)
             self._paint_word(
