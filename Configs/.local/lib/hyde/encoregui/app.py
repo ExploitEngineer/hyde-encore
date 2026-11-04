@@ -9,6 +9,7 @@ changes, so the actions live in one place.
 
 from __future__ import annotations
 
+import atexit
 import os
 import subprocess
 import sys
@@ -23,11 +24,13 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 
+from encoregui.fullscreen import FullPage
 from encoregui.home import HomePage, LyricsPage
 from encoregui.idle import IdleField
 from encoregui.popovers import build_look_menu, build_settings_popover
 from encoregui.ui import accent_rules, hex_rgb, icon_button, icon_image, install_css
 from encorelib.colors import scheme as color_scheme
+from encorelib.config import load_config
 from encorelib.look import state_look_path, update_look
 from encorelib.palette import wallpaper_palette
 from encorelib.protocol import read_state
@@ -39,7 +42,7 @@ from encorelib.transport import key_action, step_volume
 APP_ID = os.environ.get("ENCORE_APP_ID", "org.hyde.encore")
 ENCORE_PY = str(Path(__file__).resolve().parent.parent / "encore.py")
 POLL_MS = 400
-PAGES = ("home", "lyrics")
+PAGES = ("home", "lyrics", "full")
 RECONNECT_AFTER = 1.0  # seconds without an answer before saying so
 SEEK_STEP = 5
 VOLUME_STEP = 0.05
@@ -53,6 +56,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.look_state = state_look_path()  # every change is kept for the next boot
         self.sock_path = f"{runtime_dir}/encore.sock"
         self.journal_path = f"{runtime_dir}/encore.lookups"
+        self.cfg = load_config()
         self.add_css_class("encore-app")
         self.set_default_size(960, 700)
         self.state: dict = {}
@@ -83,7 +87,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
         overlay.set_child(self.background)
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         overlay.add_overlay(root)
-        root.append(self._build_header())
+        self.header = self._build_header()
+        root.append(self.header)
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self.stack.set_transition_duration(220)
@@ -93,7 +98,12 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.lyrics = LyricsPage(self)
         self.stack.add_named(self.home, "home")
         self.stack.add_named(self.lyrics, "lyrics")
-        root.append(self._build_toolbar())
+        self.full = FullPage(self)
+        self.stack.add_named(self.full, "full")
+        atexit.register(self.full.clear_flag)  # the desktop overlay must never stay hidden
+        self.connect("notify::fullscreened", self._on_fullscreened)
+        self.toolbar = self._build_toolbar()
+        root.append(self.toolbar)
 
         key = Gtk.EventControllerKey()
         key.connect("key-pressed", self._on_key)
@@ -107,10 +117,25 @@ class EncoreWindow(Gtk.ApplicationWindow):
     def show_page(self, name: str) -> None:
         if name not in PAGES:
             name = "home"
+        leaving_full = self.page == "full" and name != "full"
         self.page = name
+        if name == "full":
+            self.fullscreen()
+            # the engine needs the output it lands on: enter once the surface is there
+            GLib.idle_add(lambda: (self.full.enter(), False)[1])
+        elif leaving_full:
+            self.full.leave()
+            self.unfullscreen()
         self.stack.set_visible_child_name(name)
+        for chrome in (self.header, self.toolbar):  # full screen is the page alone
+            chrome.set_visible(name != "full")
         if name == "lyrics":
             GLib.timeout_add(260, lambda: (self.lyrics.scroll_to_current(True), False)[1])
+
+    def _on_fullscreened(self, *_) -> None:
+        # the compositor took full screen away (a keybind, another window): never trap
+        if not self.is_fullscreen() and self.page == "full":
+            self.show_page("home")
 
     def toggle_lyrics(self) -> None:
         self.show_page("home" if self.page == "lyrics" else "lyrics")
@@ -260,6 +285,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
 
     def quit_all(self) -> None:
         """Quit Encore: the desktop lyrics and the glow stop with the window."""
+        self.full.shutdown()
         for name in ("encore-overlay.pid", "encore-glow.pid"):
             pid = read_pid(Path(self.runtime_dir) / name)
             if pid is not None and pid_alive(pid):
@@ -268,7 +294,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
         if app is not None:
             app.quit()
 
-    def _running(self, name: str) -> bool:
+    def running(self, name: str) -> bool:
+        """Whether a surface (pidfile name) runs: encore-overlay.pid, encore-glow.pid."""
         pid = read_pid(Path(self.runtime_dir) / name)
         return pid is not None and pid_alive(pid)
 
@@ -291,7 +318,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         elif action == "lyrics":
             self.toggle_lyrics()
         elif action == "fullscreen":
-            self.show_page("full")
+            self.show_page("home" if self.page == "full" else "full")
         elif action == "back":
             self.show_page("home")
         elif action == "quit":
@@ -318,7 +345,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.background.set_visible_child_name("idle" if idle else "album")
         self.chip_label.set_label(player_label(state.get("player") or ""))
         self.chip.set_sensitive(bool(state.get("players")))
-        for page in (self.home, self.lyrics):
+        for page in (self.home, self.lyrics, self.full):
             page.update(state, self.colors)
         self._sync_toggles()
         return True
@@ -350,8 +377,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
 
     def _sync_toggles(self) -> None:
         states = {
-            "desktop": self._running("encore-overlay.pid"),
-            "glow": self._running("encore-glow.pid"),
+            "desktop": self.running("encore-overlay.pid"),
+            "glow": self.running("encore-glow.pid"),
             "lock": self.lock_on,
         }
         for key, on in states.items():

@@ -57,6 +57,8 @@ WORD_CACHE_BYTES = 48 * 1024 * 1024
 SLIDE_PX = 26
 FEATHER_PX = 26
 CREDIT_SECONDS = 10.0
+PULSE_GAP_SECONDS = 4.0  # full screen: a soft note pulses through gaps longer than this
+PULSE_MS = 50
 POP_SECONDS = 0.16
 SLIDE_SECONDS = 0.2
 EXIT_SECONDS = 0.26
@@ -276,6 +278,7 @@ class LyricsEngine:
         self.credit_track = ""
         self.credit_until = 0.0
         self.credit_timer = 0
+        self.pulse_id = 0
         self.connection: Gio.SocketConnection | None = None
         self.connecting = False
         self.closed = False
@@ -532,6 +535,12 @@ class LyricsEngine:
             wake = next_word_boundary(self.state, now) if view.visible else None
             if wake is None:
                 wake = view.wake_in
+        pulse = not self.suspended and self._pulse_wanted(view)
+        if pulse and not self.pulse_id:
+            self.pulse_id = GLib.timeout_add(PULSE_MS, self._pulse_tick)
+        elif not pulse and self.pulse_id:
+            GLib.source_remove(self.pulse_id)
+            self.pulse_id = 0
         if self.suspended:  # a hidden host costs nothing until it shows again
             self._drop_anim()
             return
@@ -636,6 +645,36 @@ class LyricsEngine:
             while len(self.rasters) > RASTER_CACHE:
                 self.rasters.pop(next(iter(self.rasters)))
         return raster
+
+    def _pulse_wanted(self, view: View) -> bool:
+        """Full screen only: playing, synced lyrics, and a gap over PULSE_GAP_SECONDS away."""
+        if self.desktop or view.visible or self._card_active():
+            return False
+        state = self.state or {}
+        lyrics = state.get("lyrics") or {}
+        gap = state.get("gap")
+        if state.get("status") != "playing" or gap is None or lyrics.get("sync") in (None, "none"):
+            return False
+        until = gap.get("until")
+        return until is None or until - live_position(state, time.monotonic()) > PULSE_GAP_SECONDS
+
+    def _pulse_tick(self) -> bool:
+        self.widget.queue_draw()
+        return True
+
+    def _draw_pulse(self, sc: Scene, width: float, height: float) -> None:
+        size = int(self._line_px() * 1.6)
+        rgb = _hex_rgb(self.look_cache.get("lyric_color", self.colors.lyric))
+        key = ("pulse", size, rgb)
+        raster = self.small.get(key)
+        if raster is None:
+            raster = LineRaster(
+                "♪", ["♪"], self.font, size, size * 3, rgb, self.widget.get_scale_factor() or 1
+            )
+            self.small[key] = raster
+        beat = 0.5 + 0.5 * math.sin(time.monotonic() * 2 * math.pi)  # 1 Hz
+        alpha = 0.25 + 0.45 * beat
+        sc.image(raster.bright_img, (width - raster.width) / 2, (height - raster.height) / 2, alpha)
 
     def _line_px(self) -> int:
         """Line type size: ~4% of the screen height at the default size 30."""
@@ -1078,6 +1117,8 @@ class LyricsEngine:
         if not view.visible:
             if self._card_active():
                 self._draw_card(sc, width, height)
+            elif self.pulse_id:
+                self._draw_pulse(sc, width, height)
             return
         if self.style in ("stack", "visual"):
             self._draw_rolling(sc, width, height, view)
@@ -1146,7 +1187,7 @@ class LyricsEngine:
         self.closed = True
         self.cancel.cancel()
         self._drop_anim()
-        for attr in ("timeout_id", "credit_timer"):
+        for attr in ("timeout_id", "credit_timer", "pulse_id"):
             if getattr(self, attr):
                 GLib.source_remove(getattr(self, attr))
                 setattr(self, attr, 0)

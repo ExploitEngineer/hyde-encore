@@ -75,6 +75,11 @@ menubutton.chip > button:hover { background: rgba(255,255,255,0.12); }
 .lyric.seekable:hover { color: rgba(236,236,240,0.75); }
 .lyric.seekable.current:hover { color: #f4f4f7; }
 button.round.on { border-color: rgba(255,255,255,0.18); }
+.fullbar button.pill, .fullbar button.round { background: rgba(20,18,24,0.55);
+                                              border: 1px solid rgba(255,255,255,0.12); }
+.fullbar button.pill:hover, .fullbar button.round:hover { background: rgba(40,36,48,0.75); }
+.fullbar .title { font-size: 15px; } .fullbar .artist { font-size: 12px; }
+.fullbar .time { color: rgba(255,255,255,0.75); }
 """
 
 

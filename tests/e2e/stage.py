@@ -183,6 +183,9 @@ def main() -> int:
     parser.add_argument("--cover", default="", help="cover image (default: newest cached)")
     parser.add_argument("--no-player", action="store_true", help="no music player: the idle screen")
     parser.add_argument("--no-lyrics", action="store_true", help="no lyrics for the song")
+    parser.add_argument(
+        "--stop-player", action="store_true", help="close the player once the app is open"
+    )
     parser.add_argument("--title", default="", help="the fake song's title")
     parser.add_argument("--artist", default="", help="the fake song's artist")
     parser.add_argument("--ref", default="", help="reference frame for a side-by-side sheet")
@@ -195,16 +198,18 @@ def main() -> int:
         # GTK_A11Y=none: the private bus cannot activate the accessibility registry,
         # which makes GtkApplication registration fail and the surface exit
         h.env.update(ENCORE_OVERLAY_MONITOR=LAB, ENCORE_GLOW_MONITOR=LAB, GTK_A11Y="none")
+        h.env["ENCORE_FULL_HIDE_MS"] = "600000"  # stills show the full-screen bars
         if not args.no_lyrics:
             h.write_lrc(args.artist or ARTIST, args.title or TITLE, LRC)
         cover = Path(args.cover) if args.cover else default_cover(Path(tmp))
+        player = None
         if args.no_player:
             h.start_daemon()
             h.wait_until(lambda: h.state() is not None, "the daemon", 15)
         else:
             extra = [f"--title={args.title}"] if args.title else []
             extra += [f"--artist={args.artist}"] if args.artist else []
-            h.start_player("encoretest", str(cover), *extra)
+            player = h.start_player("encoretest", str(cover), *extra)
             h.start_daemon()
             h.ctl("encoretest", "play")
             h.wait(
@@ -226,6 +231,22 @@ def main() -> int:
             h._spawn(["bash", str(LIB / "encore.sh"), "overlay"], "overlay.log")
         if args.glow:
             h._spawn(["bash", str(LIB / "encore.sh"), "glow", "--run"], "glow.log")
+        logs = out / "logs"
+        try:
+            run_stage(args, h, lab, out, player)
+        finally:
+            # the surfaces' logs matter most when something went wrong
+            shutil.rmtree(logs, ignore_errors=True)
+            shutil.copytree(h.tmp / "logs", logs)
+            for name in ("overlay.log", "glow.log", "app.log"):
+                text = h.log(name)
+                if "Traceback" in text or "CRITICAL" in text:
+                    print(f"--- {name}\n{text[-1500:]}", file=sys.stderr)
+    return 0
+
+
+def run_stage(args, h: Harness, lab: Lab, out: Path, player: subprocess.Popen | None) -> None:
+    if True:
         player_box = None
         if args.app:
             player_box, _app = open_app(h, lab, args.app)
@@ -236,6 +257,10 @@ def main() -> int:
                 print(f"relaunch: second launch exited {code}, {windows} Encore window(s)")
                 if code != 0 or windows != 1:
                     raise RuntimeError("a second launch must leave exactly one window")
+        if args.stop_player and player is not None:
+            player.terminate()
+            player.wait(5)
+            h.wait(lambda s: s["status"] == "stopped")
         time.sleep(3.0)  # first frames, fonts and the art layer
         try:
             # where each encore surface really landed, and how big it is
@@ -253,7 +278,7 @@ def main() -> int:
 
         shots = []
         for at in [float(x) for x in args.at.split(",") if x]:
-            if not args.no_player:
+            if not args.no_player and not args.stop_player:
                 h.ctl("encoretest", "position", str(at))
                 h.wait(lambda s, at=at: abs(s["position"] - at) < 0.05)
             time.sleep(0.8)  # the overlay finishes its transition
@@ -282,22 +307,13 @@ def main() -> int:
             rec.wait(10)
             print(clip)
 
-        logs = out / "logs"
-        shutil.rmtree(logs, ignore_errors=True)
-        shutil.copytree(h.tmp / "logs", logs)
-        for name in ("overlay.log", "glow.log", "app.log"):
-            text = h.log(name)
-            if "Traceback" in text or "CRITICAL" in text:
-                print(f"--- {name}\n{text[-1500:]}", file=sys.stderr)
-
-    if args.ref and shots:
-        sheet = out / f"{args.style}-vs-ref.png"
-        subprocess.run(
-            ["magick", str(shots[0]), args.ref, "-resize", "x540", "+append", str(sheet)],
-            check=False,
-        )
-        print(sheet)
-    return 0
+        if args.ref and shots:
+            sheet = out / f"{args.style}-vs-ref.png"
+            subprocess.run(
+                ["magick", str(shots[0]), args.ref, "-resize", "x540", "+append", str(sheet)],
+                check=False,
+            )
+            print(sheet)
 
 
 if __name__ == "__main__":
