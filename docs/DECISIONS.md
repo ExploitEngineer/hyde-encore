@@ -30,7 +30,7 @@ System `python3` has `python-gobject`, `playerctl` and `gtk4-layer-shell` typeli
 `encore.sh` is the `hyde-shell` entry (hyde-shell prefers `.sh` over `.py`) and execs system `python3 encore.py`.
 `encorelib/` stays free of `gi` and third-party imports so it runs on either interpreter.
 
-## 9. 2026-11-03 - Autostart through HyDE's hc.start / [desktop.start] - Active
+## 9. 2026-11-03 - Autostart through HyDE's hc.start / [desktop.start] - Superseded by #20
 encore starts like HyDE's other services: `hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-encore.service -t service -- encore.sh daemon --if-enabled`.
 The daemon exits at once unless `[encore] enable = true`, so the entry can ship enabled-by-config without starting anything by default.
 
@@ -76,3 +76,8 @@ Parsing it now would add a hand-written YAML subset for almost no tracks; re-sur
 Scored against 11 word-synced songs in the local cache (3,589 words, `tests/tools/calibrate_timing.py`, numbers only): the old 0.45 s-per-character cap gave a 0.43 s mean word-start error.
 Capping the pace at 0.08 s per letter (3 units per CJK character, which is split per character) and filling at most 90% of the gap to the next line gives 0.21 s overall, 0.25 s and 0.20 s on the two song halves.
 Real gaps from a line's last word to the next line: median 0.27 s, p99 6.5 s, so a line stays live 4 s after its last word; then the state reports `gap` instead of a stuck, fully lit line.
+
+## 20. 2026-11-04 - The daemon starts on demand; login autostart needs a start_up.lua line - Active
+HyDE's `start_up.lua` runs a fixed list of `hc.start` keys in its `hyprland.start` handler and never iterates the table, so `hc.start.encore` and `[desktop.start] encore` were never executed: encore had never autostarted, and after a fresh login every surface stayed empty while Spotify played.
+`toggle`, `glow` and the player now start the daemon when its socket does not answer, as the same `hyde-<desktop>-encore.service` unit (not gated on `enable`, since the user asked for a surface), falling back to a detached `encore.py daemon` when `hyde-shell` or the unit fails.
+Login autostart is a `hl.on("hyprland.start", ...)` line in the user's `hyprland.lua` here, and `check_exec(hs.encore)` in `start_up.lua` in the upstream PR.

@@ -48,15 +48,17 @@ hyde-shell hyprlock.sh --select   # pick the "Encore" lock screen layout
 Suggested binds and the player window rule are in `Configs/.local/share/hypr/lua/key_binds.encore.lua` and `window_rules.encore.lua`; copy them into `~/.config/hypr/hyprland.lua`.
 The binds are SUPER+ALT+L (overlay), SUPER+ALT+K (next style), SUPER+ALT+M (player) and SUPER+ALT+E (show workspace).
 
-To start it with your session, add to `~/.config/hyde/config.toml`:
+Opening the overlay, the glow or the player starts the `encore` service when it is not running.
+To start it with your session too, set `enable = true` under `[encore]` in `~/.config/hyde/config.toml` and add this to `~/.config/hypr/hyprland.lua`:
 
-```toml
-[encore]
-enable = true
-
-[desktop.start]
-encore = "hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-encore.service -t service -- encore.sh daemon --if-enabled"
+```lua
+hl.on("hyprland.start", function()
+  hl.exec_cmd("hyde-shell app -u hyde-" .. (os.getenv("XDG_SESSION_DESKTOP") or "Hyprland")
+    .. "-encore.service -t service -- encore.sh daemon --if-enabled")
+end)
 ```
+
+HyDE's `start_up.lua` runs only the `hc.start` keys it names, so a `[desktop.start] encore` entry alone never starts it; the upstream change adds `check_exec(hs.encore)` there (`Configs/.local/share/hypr/lua/start_up.encore.lua`).
 
 ## Configuration
 

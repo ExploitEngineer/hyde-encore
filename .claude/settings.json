@@ -1,0 +1,7 @@
+{
+  "worktree": {
+    "baseRef": "fresh",
+    "bgIsolation": "worktree",
+    "symlinkDirectories": [".cache"]
+  }
+}
