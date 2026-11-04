@@ -20,9 +20,24 @@ def test_estimate_spans_line():
     assert (out.words[2].end - out.words[2].start) > (out.words[0].end - out.words[0].start)
 
 
-def test_estimate_caps_long_gap():
-    out = estimate_words(Line(10.0, 40.0, "hi"))
-    assert out.words[-1].end == pytest.approx(10.0 + 0.45 * 2)
+def test_estimate_paces_long_window():
+    # a long window (instrumental after the line) must not stretch the words
+    out = estimate_words(Line(10.0, 40.0, "hello there world"))
+    assert len(out.words) == 3
+    assert out.words[1].start == pytest.approx(10.4)
+    assert out.words[-1].end == pytest.approx(11.2)
+
+
+def test_estimate_fills_short_window():
+    out = estimate_words(Line(10.0, 11.0, "hello there world"))
+    assert out.words[-1].end == pytest.approx(10.9)
+
+
+def test_estimate_cjk_per_character():
+    out = estimate_words(Line(0.0, 10.0, "夜に駆ける"))
+    assert [w.text for w in out.words] == ["夜", "に", "駆", "け", "る"]
+    for w in out.words:
+        assert w.end - w.start == pytest.approx(0.24)
 
 
 def test_estimate_empty_text():

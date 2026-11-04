@@ -6,8 +6,13 @@ from bisect import bisect_right
 from dataclasses import dataclass, replace
 
 from .model import Line, Lyrics, Word
+from .words import split_words, word_units
 
-SECONDS_PER_CHAR = 0.45
+# Calibrated against real word-synced songs (DECISIONS #19): singers run
+# about 0.07 s per letter, so cap the pace there and leave a short tail
+# before the next line instead of stretching words across instrumentals.
+SECONDS_PER_UNIT = 0.08
+LINE_FILL = 0.9
 WORD_WEIGHT_PAD = 2
 
 
@@ -22,12 +27,14 @@ NO_CURSOR = Cursor(-1, -1, 0.0)
 
 
 def estimate_words(line: Line) -> Line:
-    """Spread a line's words over its duration, weighted by word length."""
-    texts = line.text.split()
+    """Spread a line's words at a singing pace, weighted by word length."""
+    texts = split_words(line.text)
     if not texts:
         return replace(line, words=())
-    stop = min(line.end, line.start + SECONDS_PER_CHAR * len(line.text))
-    weights = [len(t) + WORD_WEIGHT_PAD for t in texts]
+    units = [word_units(t) for t in texts]
+    duration = min((line.end - line.start) * LINE_FILL, SECONDS_PER_UNIT * sum(units))
+    stop = line.start + max(0.0, duration)
+    weights = [u + WORD_WEIGHT_PAD for u in units]
     scale = (stop - line.start) / sum(weights)
     words = []
     t = line.start
