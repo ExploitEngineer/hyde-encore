@@ -1,9 +1,11 @@
 """Screen-edge glow that breathes with the music.
 
-Four thin layer-shell strips (one per edge) fade from the album accent
-to transparent. While music plays the intensity rides a beat envelope
-fed by HyDE's cava socket when it exists, else a slow breathe. Paused
-shows a faint static glow; stopped hides entirely.
+One click-through layer-shell window covers the whole output; each tick
+paints all four edges into a 1/DOWNSCALE texture that GSK stretches on
+the GPU. Two comets circle the frame in the album colors. While music
+plays the intensity rides a beat envelope fed by HyDE's cava socket when
+it exists, else a slow breathe. Paused shows a faint static glow;
+stopped hides entirely.
 """
 
 from __future__ import annotations

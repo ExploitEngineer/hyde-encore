@@ -1,81 +1,70 @@
 # State
 
-## Shipped (branch feat/encore-core, Plan 1)
-- `encorelib/`: LRC and enhanced LRC parser, word-timing estimator, cursor lookup, playback clock, config loader (verified against HyDE's real `config.lua` output), providers (local `.lrc`, LRCLIB with junk-upload filter, Spicy Lyrics), lyrics cache, album palette via `wallbash.sh` on a 256px cover, JSON-lines state protocol, hyprlock markup.
-- `encore.py` daemon plus `encore.sh` hyde-shell entry: follows the most recently started MPRIS player, worker-thread fetches guarded against stale results, `daemon [--if-enabled]`, `status`, `hyprlock`.
-- `Encore.conf` hyprlock layout; schema, config and `hc.start` autostart fragments for upstream.
-- Lookup rules (`encorelib/lookup.py`): local `.lrc` always wins and is never cached; provider errors are never cached; cache key includes enabled sources.
-- 134 unit tests; `tests/e2e/fake_mpris.py` scriptable MPRIS player for end-to-end runs.
+Goal: match, then beat, Verci (lyrics) and Lumn (glow, player), polished enough to show publicly; upstream PRs to HyDE after.
+Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 glow, 5 player, 6 lock screen and HyDE integration, 7 review.
 
-## Measured (fake MPRIS player, this laptop, 2026-11-03)
-- Playing: about 0.4% of one core, about 40 MB RSS.
-- Paused: 0 CPU ticks over 10 s; 0 to 1.4 context switches per second across runs, 0 on the latest run.
-- E2E verified: word-by-word line follows playback, seek forward and back lands within 0.3 s, three fast skips end on the right song, two players hand over correctly, clean shutdown removes runtime files.
+## Shipped (main, PRs #1-#8)
+- Engine (`encorelib/`): LRC and enhanced LRC parser, word-timing estimator, cursor lookup, playback clock, config loader, providers (local `.lrc` always wins and is never cached, LRCLIB with junk-upload filter, Spicy Lyrics syllable sync with a user key), lyrics cache (errors never cached), album palette via `wallbash.sh`, JSON-lines protocol v1 (`lyrics.lines` carries the whole song).
+- Daemon (`encore daemon`): follows the most recently started MPRIS player or `[encore] players`, worker-thread fetches guarded against stale results, publishes `encore.sock` plus hyprlock line, track and cover files.
+- Overlay (`encore toggle`, `encore style`): GTK4 layer-shell, click-through, styles `line` (karaoke strip), `stack` (rolling column, ghost trails, mixed fonts), `constellation` (word chain, hairlines, cluster fade), `visual` (full-bleed art layer, column with glyphs and a Highlight marker).
+- Live look (`encore look`, runtime `encore.look`): style, font, size, Lyric Text / Highlight / Secondary colors, next line, motion.
+- Glow (`encore glow`): one full-screen click-through window, 1/4-res texture scaled on the GPU, two comets circling, cava beat envelope or breathe fallback, 12.5 fps; look keys for gradient (1 or 2 colors), animation (music, breathe, static), thickness, intensity, override colors.
+- Player window (`encore menu`, SUPER+ALT+M): art with tinted glow and hover-expand, transport, Lyrics pill with scrolling list, bottom toolbar, look menu, glow Settings popover.
+- Profiles `working` and `show` (`encore profile`); `encore show` toggles the empty `encore` workspace.
+- hyprlock `Encore.conf`: art, title, artist, word-highlighted line.
+- Upstream fragments: schema and config toml, `variables.encore.lua` (hc.start), `key_binds.encore.lua` (SUPER+ALT+{L,K,M,E}), `window_rules.encore.lua` (player floats).
+- 197 unit tests, ruff clean; `tests/e2e/fake_mpris.py` scriptable MPRIS player.
+
+## Measured (this laptop, 2026-11-03/04)
+- Daemon: playing ~0.4% of a core, ~40 MB RSS; paused 0 ticks over 10 s.
+- Overlay animating: line ~6%, stack 9%, visual 11% of a core; paused and hidden 0.
+- Glow: 2.5% of a core at 20 fps, measured before the drop to 12.5 fps.
+- Caveat: numbers came from `measure_overlay.sh` on the live runtime dir or a scratchpad harness that no longer exists; re-measure on the isolated harness (layer 2) before quoting them.
 
 ## Verified with the owner (2026-11-04)
 - Real Spotify: follows Spotify over a stopped Brave tab; Spicy Lyrics word sync on "LEGACY (slowed down)" lights word by word in time.
-- `Encore` hyprlock preview on screen: real cover, title, artist, word-by-word line, readable colors.
+- `Encore` hyprlock preview: real cover, title, artist, word-by-word line, readable colors.
 
-## Shipped (Plan 2, merged 2026-11-04, PR #3)
-- Lyrics overlay: GTK4 layer-shell, click-through, per-word feathered fill in the album accent, baked glow and shadow, dimmed next line, Spicy credit (first 10 s per track and while paused), slide-up cross-fade within a track, flock single-instance, `hyde-shell encore toggle`.
-- Measured: animating ~6% of one core at a 30 fps sweep, paused and hidden 0%; 171 tests.
+## Unverified on screen
+- Player lyrics list with a real synced song, art hover-expand, glow following the Settings popover live.
+- Overlay click-through press test; a full-resolution pixel pass of each style against `.reference/`.
 
-## Shipped (player + RE parity, 2026-11-04, branch feat/encore-player)
-- RE of the public reference assets (REA browser capture of verci.xyz / trylumn.xyz): official hero video, styles and settings screenshots, Lumn demo; findings in the parity spec.
-- Player window (SUPER+ALT+M): reference layout, lyrics mode with scrolling list, hover-expand, look menu (3-color system), glow popover wired live into the glow.
-- Visual/stack column rebuilt to the reference semantics: sung word on a sweeping Highlight marker at the bottom, previous word big, older small; drum tilt; height-relative sizing.
-- Perf: visual 85% -> 11%, stack 42% -> 9% of a core (isolated harness).
+## Broken or placebo
+- Glow popover Display picker only posts a notification; nothing moves.
+- Player bottom bar: the display button cycles the style and the lock button previews hyprlock; neither matches the reference.
+- `[encore.overlay] style = "visual"` in config.toml falls back to `line` (`config.py` accepts three styles).
+- `tests/e2e/measure_overlay.sh` runs the installed copy on the live runtime dir, so it can collide with a running session.
+- Polish, parity, setup and player branches shipped without an independent review.
 
-## Shipped (setup, 2026-11-04, branch feat/encore-setup)
-- Settings window (GTK4, floats top-right via window rule): sound setup profiles, style list, installed fonts, size slider + reset, Auto Sync + album swatches, motion/next-line/glow/lyrics switches.
-- Profiles `working` (line, still, glow off) and `show` (visual, motion, glow on); `encore show` toggles the empty `encore` workspace with the show profile.
-- Glow v3: two comets circle the frame, faster on the beat; one full-screen GPU-scaled window, 2.5% of a core.
-- Echo-depth ghost trails (4 copies) on rolling-column slides, matching r4.
-- Owner binds: SUPER+ALT+{L,K,M,E}.
-
-## Shipped (reel parity, 2026-11-04, branch feat/encore-parity, PR #6)
-- Frame-stepped audit of all 7 reels into `docs/superpowers/specs/2026-11-04-verci-parity.md`; reels kept locally in gitignored `.reference/`.
-- Stack/visual rolling column with ghost slides and per-word font mix; chain constellation with cluster fade; `visual` style (full-bleed art + glyphs); card v2 with pill controls.
-- Post-ship review owed for polish AND parity branches (deadline shipped both review-light).
-
-## Shipped (polish, 2026-11-04, branch feat/encore-polish)
-- Glow v2: covers the true screen edge including waybar and corners (exclusive zone -1), two-accent gradient flowing along the edges, faster on the beat.
-- Text motion: constellation drift and stack breathe while playing, `motion` look key and menu row (default on).
-- Menu: Motion row and Player picker row (hand encore any MPRIS player).
-
-## Shipped (Plan 3, 2026-11-04, branch feat/encore-showcase)
-- Overlay styles `stack` and `constellation` (live switch via `hyde-shell encore style`), matching the Verci reel looks; word-boundary scheduling, paused/hidden cost 0.
-- `hyde-shell encore glow`: four-edge accent glow, cava beat envelope with breathe fallback, ~6% of one core playing, repaint-skip when imperceptible.
-
-## In progress
-- Owner reference study (2026-11-04): 7 Verci/Lumn Instagram reels decoded to contact sheets; signature looks are bezel glow, constellation word-map, stacked mixed-font words, full-bleed album art. Drives Plans 3-5.
-- Owner live checks still open: click-through press on the overlay, pixel pass, SUPER+ALT+L bind.
-- Auto-lyrics (vocal separation + Whisper) spike parked: owner confirmed the target song has no lyrics anywhere; revisit later. Venv and recording live in `~/.cache/hyde/encore/autosync/`.
-
-## Known gaps (deferred from review)
+## Known gaps (engine and daemon)
 - Empty artist still sends `artist_name=` to LRCLIB search; no `feat.`-stripped retry.
-- Fast skipping spawns one fetch and palette thread per track (results are discarded safely).
-- Last sung word stays lit through long unmarked instrumental gaps; CJK lines light as one word.
-- Playback rate fixed at 1.0; no automated test of the GLib daemon class.
+- CJK lines light as one word; the last sung word stays lit through long unmarked instrumental gaps.
+- Playback rate fixed at 1.0.
+- Fast skipping spawns one fetch and one palette thread per track (results are discarded safely).
+- No automated test of the GLib daemon class.
+
+## Not built
+- Multi-monitor: overlay picks one output (`overlay.monitor`), glow takes the compositor's choice.
+- Colors following the active HyDE theme (wallbash template for encore) and the opt-in `follow_album` full-theme recolor.
+- Glow autostart; only the overlay has an `enable` key.
 
 ## Next
-- Owner checks, then merge `feat/encore-core`.
-- Plan 3: overlay style system (constellation and stack modes, live switch).
-- Plan 4: edge glow from HyDE's `cava.py` socket, beat-reactive. Plan 5: `follow_album` spike, full-theme recolor, showcase video.
+- Layer 1: engine gaps above, test-first; evaluate LRCLIB `hasWordSync` and `lyricsfile` (YAML with per-line `end_ms`).
+- Layer 2: bounded fetch pool, real playback rate, isolated perf harness in `tests/e2e/`, pytest E2E of the daemon against `fake_mpris.py`.
+- Layers 3-7 as listed above.
 
 ## Known facts
-- HyDE upstream bugs found (candidate small PRs): `hyprlock.sh find_filepath` uses `find -type f` without `-L`, so symlinked layouts are listed but fail to load; `hyprlock.sh fn_mpris` reads the first listed player, not the playing one.
+- HyDE bugs found (candidate small PRs): `hyprlock.sh find_filepath` uses `find -type f` without `-L`, so symlinked layouts fail to load and `Encore.conf` is installed as a copy; `hyprlock.sh fn_mpris` reads the first listed player, not the playing one.
 - Owner's Spicy Lyrics key lives in `~/.config/hyde/config.toml` (mode 600, not tracked by dotfiles).
-- This laptop's `~/.config/hyde/config.toml` only has `$schema`, so `config.lua` writes no `~/.local/state/hyde/config`; that file appears once any setting (such as `[encore]`) is added. Not a HyDE bug.
-- LRCLIB `/api/get` can return junk uploads (single `probe` line); encore rejects synced results under 4 timed lines and falls back to search.
-- Spicy Lyrics schema read from the OpenAPI document embedded in its docs page; parser unverified against a live response until the owner adds a key.
+- HyDE writes `~/.local/state/hyde/config` only once config.toml holds a setting beyond `$schema`. Not a HyDE bug.
+- LRCLIB `/api/get` can return junk uploads (single `probe` line); synced results under 4 timed lines are rejected and search runs instead.
+- Auto-lyrics spike (vocal separation + Whisper) parked; venv and recording in `~/.cache/hyde/encore/autosync/`.
 
 ## Open questions
 - Final name (working name: hyde-encore).
 
 ## Ideas
-- LRCLIB now exposes `hasWordSync` and a `lyricsfile` payload; parsing it could give word-level timing without a Spotify-only key.
-- A `hyde-shell encore lrc` command to save the current lyrics as a local `.lrc` for offline use and hand-tuning.
+- `hyde-shell encore lrc` saves the current lyrics as a local `.lrc` for offline use and hand-tuning.
 - Waybar module showing the current lyric line from `encore.sock`.
 
-verified: a3776fa 2026-11-04
+verified: 0a45d7a 2026-11-04

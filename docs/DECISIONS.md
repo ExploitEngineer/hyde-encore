@@ -43,22 +43,25 @@ Animation runs on a 30 fps GLib timer because an active GTK tick callback forces
 A crash or toggle of the overlay never touches playback tracking.
 
 ## 12. 2026-11-04 - Overlay styles are one process with a live style file - Active
-`line`, `stack` and `constellation` share the overlay process, socket client and caches; `hyde-shell encore style` writes `$XDG_RUNTIME_DIR/hyde/encore.look`, which the existing runtime-dir monitor picks up.
+`line`, `stack`, `constellation` and later `visual` (#17) share the overlay process, socket client and caches; `hyde-shell encore style` writes `$XDG_RUNTIME_DIR/hyde/encore.look`, which the existing runtime-dir monitor picks up.
 Stack and constellation redraw on word boundaries plus 160 ms pops only.
 
-## 13. 2026-11-04 - Edge glow is four layer strips in its own process - Active
+## 13. 2026-11-04 - Edge glow is four layer strips in its own process - Superseded by #14
 `hyde-shell encore glow` toggles it independently of lyrics; intensity rides a cava attack/release envelope when `cava.sock` exists, else a slow breathe; repaints skip when the intensity change is imperceptible.
 
-## 14. 2026-11-04 - Glow is one full-screen window with a GPU-scaled texture - Active (supersedes the four-strip layout in #13)
+## 14. 2026-11-04 - Glow is one full-screen window with a GPU-scaled texture - Active
 Circling comets need continuous repaint; four strip windows at 20 fps cost 23% of a core (CPU raster) and still 9-12% after downscaling, because GTK's per-window frame overhead dominated.
 One click-through window composes all four edges into a 1/4-resolution frame texture that GSK stretches on the GPU: 2.5% of a core at 20 fps, compositor +1%.
+The tick later dropped to 80 ms (12.5 fps), which reads smooth for slow comets.
+Kept from #13: own process toggled by `hyde-shell encore glow`, cava attack/release envelope when `cava.sock` exists, else a slow breathe.
 
-## 15. 2026-11-04 - Settings window and sound-setup profiles - Active
+## 15. 2026-11-04 - Settings window and sound-setup profiles - Superseded by #16
 A GTK4 panel (`hyde-shell encore menu`, SUPER+ALT+M) modelled on the reference app replaces the rofi menu (kept as `menu --rofi`); profiles `working` and `show` set look keys and the glow state; `encore show` (SUPER+ALT+E) toggles an empty `encore` workspace running the show profile.
 
-## 16. 2026-11-04 - Three reference UIs, built separately - Active (supersedes the settings panel in #15)
+## 16. 2026-11-04 - Three reference UIs, built separately - Active
 RE of the public reference assets showed three different UIs: the lyrics look menu, the player window, and the glow settings popover.
 `hyde-shell encore menu` (SUPER+ALT+M) now opens the player window; its palette button opens the look menu (styles, fonts, size, Lyric Text / Highlight / Secondary colors), its Settings pill opens the glow popover (gradient, animation, thickness, glow, override colors, display).
+Kept from #15: the `working` and `show` profiles and the `encore show` workspace; the rofi menu stays as `menu --rofi`.
 
 ## 17. 2026-11-04 - Column styles render for steady 1:1 blits; visual art is its own layer - Active
 Visual cost 85% of a core: words re-typeset at interpolated sizes every frame and big bitmaps went through cairo's convolution filter with skew.
