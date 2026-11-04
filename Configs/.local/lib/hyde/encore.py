@@ -659,31 +659,6 @@ def run_profile(name: str) -> int:
     return 0
 
 
-def run_show() -> int:
-    """Toggle the show workspace: an empty stage with the full show running."""
-    from encorelib.profiles import SHOW_WORKSPACE, show_action
-
-    try:
-        active = json.loads(
-            subprocess.run(
-                ["hyprctl", "activeworkspace", "-j"], capture_output=True, text=True, check=True
-            ).stdout
-        ).get("name", "")
-    except (OSError, ValueError, subprocess.CalledProcessError):
-        active = ""
-    if show_action(active) == "enter":
-        subprocess.run(
-            ["hyprctl", "dispatch", "workspace", f"name:{SHOW_WORKSPACE}"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-        )
-        return run_profile("show")
-    subprocess.run(
-        ["hyprctl", "dispatch", "workspace", "previous"], check=False, stdout=subprocess.DEVNULL
-    )
-    return run_profile("working")
-
-
 def run_follow(name: str) -> int:
     """Pin the player encore follows, or 'auto' to follow the most recent one."""
     name = name.strip()
@@ -968,9 +943,8 @@ def main(argv: list[str] | None = None) -> int:
     menu.add_argument("--rofi", action="store_true", help="use the compact rofi menu instead")
     player = sub.add_parser("player", help="open Encore (same as 'app')")
     player.add_argument("--open", choices=("player", *APP_PAGES), default=None)
-    profile = sub.add_parser("profile", help="apply a sound setup: working or show")
-    profile.add_argument("name", help="working | show")
-    sub.add_parser("show", help="toggle the show workspace (full show on an empty stage)")
+    profile = sub.add_parser("profile", help="apply a sound setup (working)")
+    profile.add_argument("name", help="working")
     lock = sub.add_parser("lock", help="lyrics on the lock screen: on, off, preview, status")
     lock.add_argument("action", choices=("on", "off", "preview", "status"))
     follow = sub.add_parser("follow", help="follow one player, or 'auto' for the most recent")
@@ -1000,8 +974,6 @@ def main(argv: list[str] | None = None) -> int:
         return run_app_cmd("home" if args.open == "player" else args.open)
     if args.command == "profile":
         return run_profile(args.name)
-    if args.command == "show":
-        return run_show()
     if args.command == "glow":
         return run_glow_cmd() if args.run else run_glow_toggle()
     if args.command == "lookups":
