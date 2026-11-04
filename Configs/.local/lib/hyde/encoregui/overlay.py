@@ -108,8 +108,18 @@ class LineRaster:
         self.height = logical.height + 2 * self.pad
         self.width = width
         self.rects = self._word_rects(layout, text, words)
+        self._shadow_layer = self._shadow(layout)
         self.dim = self._render(layout, rest, rest_alpha, glow=None)
-        self.bright = self._render(layout, accent, 1.0, glow=accent)
+        # the lit copy is only needed by lines that fill word by word; small
+        # rasters (next line, credit, card) never show it, so build it lazily
+        self._layout, self._accent = layout, accent
+        self._bright: cairo.ImageSurface | None = None
+
+    @property
+    def bright(self) -> cairo.ImageSurface:
+        if self._bright is None:
+            self._bright = self._render(self._layout, self._accent, 1.0, glow=self._accent)
+        return self._bright
 
     @staticmethod
     def _char_box(layout, index: int) -> tuple[float, float, float, float]:
@@ -149,39 +159,49 @@ class LineRaster:
                 )
         return out
 
+    def _shadow(self, layout) -> cairo.ImageSurface:
+        """A soft drop shadow, built once per line and shared by dim and bright.
+
+        The glyph shape is filled once into an alpha mask; the blur comes from
+        shifted blits of that mask (cheap pixman copies), not repeated path
+        fills, which made every line change cost tens of milliseconds.
+        """
+        sw, sh = self.width * self.scale, self.height * self.scale
+        mask = cairo.ImageSurface(cairo.FORMAT_A8, sw, sh)
+        mask.set_device_scale(self.scale, self.scale)
+        mc = cairo.Context(mask)
+        mc.translate(0, self.pad)
+        PangoCairo.layout_path(mc, layout)
+        mc.fill()
+        shadow = cairo.ImageSurface(cairo.FORMAT_ARGB32, sw, sh)
+        shadow.set_device_scale(self.scale, self.scale)
+        cr = cairo.Context(shadow)
+        cr.set_source_rgba(0, 0, 0, 0.14)
+        cr.mask_surface(mask, 0, 2.2)
+        for radius, a in ((3.6, 0.06), (1.6, 0.1)):
+            cr.set_source_rgba(0, 0, 0, a)
+            for k in range(8):
+                ang = k * math.pi / 4
+                cr.mask_surface(mask, radius * math.cos(ang), 2.2 + radius * math.sin(ang))
+        return shadow
+
     def _render(self, layout, rgb, alpha: float, glow) -> cairo.ImageSurface:
         surface = cairo.ImageSurface(
             cairo.FORMAT_ARGB32, self.width * self.scale, self.height * self.scale
         )
         surface.set_device_scale(self.scale, self.scale)
         cr = cairo.Context(surface)
+        cr.set_source_surface(self._shadow_layer, 0, 0)
+        cr.paint()
         cr.translate(0, self.pad)
-        # soft drop shadow: rings of faint offset copies approximate a blur,
-        # baked once per line so text reads on light windows without a halo
-        cr.save()
-        PangoCairo.layout_path(cr, layout)
-        path = cr.copy_path()
-        cr.new_path()
-        for radius, a in ((5.0, 0.05), (3.4, 0.07), (2.0, 0.1), (0.9, 0.14)):
-            for k in range(8):
-                ang = k * math.pi / 4
-                cr.save()
-                cr.translate(radius * math.cos(ang), 2.2 + radius * math.sin(ang))
-                cr.append_path(path)
-                cr.set_source_rgba(0, 0, 0, a)
-                cr.fill()
-                cr.restore()
-        cr.restore()
         if glow is not None:
             # bloom: wide, faint strokes in the accent around sung words
-            cr.save()
             PangoCairo.layout_path(cr, layout)
             for width, a in ((12.0, 0.05), (7.0, 0.08), (3.5, 0.14)):
                 cr.set_source_rgba(*glow, a)
                 cr.set_line_width(width)
                 cr.stroke_preserve()
             cr.new_path()
-            cr.restore()
         cr.set_source_rgba(*rgb, alpha)
         cr.move_to(0, 0)
         PangoCairo.show_layout(cr, layout)
@@ -326,7 +346,9 @@ class Overlay:
         # credit; the surface is transparent, so the slack is invisible
         line = self._line_px()
         small = max(12, int(line * 0.6))
-        height = int(line * 4.6 + small * 5.6 + 56 + line)
+        # two rows of the main line plus slide headroom, two of the next line,
+        # the credit; every extra pixel is composited on each animation frame
+        height = int(line * 3.6 + small * 4.2 + 40)
         self.window.set_default_size(self.content_width, height)
 
     def _layout_stage(self) -> None:
@@ -644,12 +666,19 @@ class Overlay:
             playing = (self.state or {}).get("status") == "playing"
             if self.exit_snapshot is not None and now - self.exit_from >= EXIT_SECONDS:
                 self.exit_snapshot = None
-            still = (
+            moving = (
                 (now - self.fade_from) < POP_SECONDS
                 or (now - self.slide_from) < SLIDE_SECONDS
                 or self.exit_snapshot is not None
-                or (self.motion and view.visible and playing)
             )
+            drifting = self.motion and view.visible and playing
+            still = moving or drifting
+            if still and not moving:
+                # the idle drift moves a few pixels a second: 15 fps reads the
+                # same as 30 and halves the compositing of a full-screen canvas
+                self.drift_frame = not getattr(self, "drift_frame", False)
+                if self.drift_frame:
+                    return True
         if changed_key or not view.visible or not still:
             self.anim_id = 0
             GLib.idle_add(self.apply)

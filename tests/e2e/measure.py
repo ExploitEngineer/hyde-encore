@@ -13,6 +13,7 @@ Usage: python3 tests/e2e/measure.py [--seconds N] [--overlay] [--glow]
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 import tempfile
@@ -22,6 +23,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from harness import LIB, Harness, write_png
+from stage import LAB, Lab
+
+from encorelib.look import update_look
 
 ARTIST, TITLE = "Rick Astley", "Never Gonna Give You Up"  # fake_mpris track 1
 # invented lines every 2 s for three minutes, so the cursor keeps moving
@@ -50,14 +54,26 @@ def main() -> int:
     parser.add_argument("--seconds", type=float, default=10.0, help="length of each phase")
     parser.add_argument("--overlay", action="store_true", help="also measure the lyrics overlay")
     parser.add_argument("--glow", action="store_true", help="also measure the edge glow")
+    parser.add_argument("--style", default="line", help="overlay style to measure")
+    parser.add_argument("--renderer", default="", help="GSK_RENDERER for the GUI surfaces")
+    parser.add_argument(
+        "--lab", action="store_true", help="run GUI surfaces on the hidden stage monitor"
+    )
     args = parser.parse_args()
 
-    with tempfile.TemporaryDirectory() as tmp, Harness(Path(tmp)) as h:
+    lab = Lab() if args.lab else contextlib.nullcontext()
+    with tempfile.TemporaryDirectory() as tmp, lab, Harness(Path(tmp)) as h:
+        h.env["GTK_A11Y"] = "none"  # the private bus has no accessibility registry
+        if args.renderer:
+            h.env["GSK_RENDERER"] = args.renderer
+        if args.lab:
+            h.env.update(ENCORE_OVERLAY_MONITOR=LAB, ENCORE_GLOW_MONITOR=LAB)
         h.write_lrc(ARTIST, TITLE, LRC)
         h.start_player(art=str(write_png(Path(tmp) / "cover.png")))
         pids = {"daemon": h.start_daemon().pid}
         h.ctl("encoretest", "play")
         h.wait(lambda s: s["status"] == "playing" and s["lyrics"] and s["track"]["art"], 15)
+        update_look(h.run / "hyde" / "encore.look", style=args.style)
         if args.overlay:
             pids["overlay"] = h._spawn(["bash", str(LIB / "encore.sh"), "overlay"], "ov.log").pid
         if args.glow:

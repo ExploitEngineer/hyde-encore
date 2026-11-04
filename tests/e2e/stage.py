@@ -193,16 +193,16 @@ def main() -> int:
             player_box = open_player(h, lab, args.player)
         time.sleep(3.0)  # first frames, fonts and the art layer
         try:
+            # where each encore surface really landed, and how big it is
             raw = json.loads(hyprctl("layers", "-j") or "{}")
-            layers = raw.get(LAB, {}).get("levels", {})
-            print("layer monitors:", list(raw), flush=True)
-            for level, items in sorted(layers.items()):
-                for layer in items:
-                    if "encore" in layer["namespace"]:
-                        print(
-                            f"layer {layer['namespace']} level {level}: "
-                            f"{layer['x']},{layer['y']} {layer['w']}x{layer['h']}"
-                        )
+            for monitor, data in raw.items():
+                for level, items in sorted(data.get("levels", {}).items()):
+                    for layer in items:
+                        if "encore" in layer["namespace"]:
+                            print(
+                                f"layer {monitor} {layer['namespace']} level {level}: "
+                                f"{layer['x']},{layer['y']} {layer['w']}x{layer['h']}"
+                            )
         except ValueError:
             pass
 
