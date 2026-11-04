@@ -23,7 +23,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +35,7 @@ import pyutils.logger as hyde_logger
 from encorelib.cache import LyricsCache
 from encorelib.clock import PlaybackClock
 from encorelib.config import EncoreConfig, load_config
+from encorelib.jobs import LatestJobs
 from encorelib.lookup import lookup_lyrics
 from encorelib.palette import album_palette, cover_png, fetch_art, wallpaper_palette
 from encorelib.protocol import (
@@ -99,6 +99,9 @@ class Encore:
         self.clock = PlaybackClock()
         self.lyrics_gate = FetchGate()
         self.palette_gate = FetchGate()
+        # skipping through songs only ever needs the newest track's work
+        self.lyrics_jobs = LatestJobs(workers=2)
+        self.palette_jobs = LatestJobs(workers=1)
         self.player = None
         self.track: TrackInfo | None = None
         self.art_url = ""
@@ -223,7 +226,7 @@ class Encore:
         self.track, self.art_url = info, art_url
         self.lyrics, self.art, self.last_cursor = None, None, None
         token = self.lyrics_gate.begin(track_key(info))
-        threading.Thread(target=self.fetch_lyrics, args=(info, token), daemon=True).start()
+        self.lyrics_jobs.submit(lambda: self.fetch_lyrics(info, token))
         self.start_palette(info, art_url)
 
     def fetch_lyrics(self, info: TrackInfo, token: int) -> None:
@@ -262,7 +265,7 @@ class Encore:
                 log.exception("album palette failed")
             self.GLib.idle_add(self.apply_palette, token, track_key(info), art, palette)
 
-        threading.Thread(target=work, daemon=True).start()
+        self.palette_jobs.submit(work)
 
     def apply_palette(self, token: int, key: str, art, palette) -> bool:
         if self.palette_gate.accept(token, key):

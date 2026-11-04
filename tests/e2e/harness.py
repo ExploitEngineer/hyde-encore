@@ -142,6 +142,20 @@ class Harness:
         path = self.tmp / "logs" / name
         return path.read_text(errors="replace") if path.exists() else ""
 
+    def slow_wallbash(self, seconds: float) -> None:
+        """Make album palette work slow (a stub wallbash.sh that sleeps and fails).
+
+        Call before start_daemon. A private LIB_DIR keeps HyDE's real pyutils.
+        """
+        real = Path(os.environ.get("LIB_DIR") or Path.home() / ".local" / "lib") / "hyde"
+        lib = self.tmp / "lib" / "hyde"
+        lib.mkdir(parents=True, exist_ok=True)
+        (lib / "pyutils").symlink_to(real / "pyutils", target_is_directory=True)
+        stub = lib / "wallbash.sh"
+        stub.write_text(f"#!/bin/sh\nsleep {seconds}\nexit 1\n")
+        stub.chmod(0o755)
+        self.env["LIB_DIR"] = str(self.tmp / "lib")
+
     # observation and control -----------------------------------------------------
 
     @property
@@ -196,3 +210,30 @@ class Harness:
         path = self.tmp / "lyrics" / f"{artist} - {title}.lrc"
         path.write_text(text, encoding="utf-8")
         return path
+
+
+def write_png(path: Path, size: int = 64, rgb: tuple[int, int, int] = (200, 40, 120)) -> Path:
+    """A solid-color PNG cover, stdlib only."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    row = b"\x00" + bytes(rgb) * size
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(row * size))
+        + chunk(b"IEND", b"")
+    )
+    Path(path).write_bytes(png)
+    return Path(path)
+
+
+def thread_count(pid: int) -> int:
+    for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+        if line.startswith("Threads:"):
+            return int(line.split()[1])
+    return 0

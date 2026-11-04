@@ -93,3 +93,41 @@ def test_shutdown_removes_runtime_files(playing):
     assert playing.daemon.wait(3) == 0
     left = sorted(p.name for p in hyde.iterdir() if p.name.startswith("encore"))
     assert left == []
+
+
+TRACKS = [(ARTIST, TITLE), ("The Weeknd", "Blinding Lights")]  # fake_mpris order
+
+
+def test_fast_skips_end_on_last_track_with_bounded_threads(harness):
+    from harness import thread_count, write_png
+
+    for artist, title in TRACKS:
+        harness.write_lrc(artist, title, f"[00:01.00]{title} line one\n[00:03.00]{title} two\n")
+    cover = write_png(harness.tmp / "cover.png")
+    harness.slow_wallbash(1.0)  # palette work outlives each skip, like a slow network
+    harness.start_player(art=str(cover))
+    daemon = harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    harness.wait(lambda s: s["status"] == "playing" and s["lyrics"] and s["track"]["art"])
+    baseline = thread_count(daemon.pid)
+    peak = baseline
+    skips = 6
+    for _ in range(skips):
+        harness.ctl("encoretest", "next")
+        peak = max(peak, thread_count(daemon.pid))
+    title = TRACKS[skips % len(TRACKS)][1]
+
+    def settled(s):
+        nonlocal peak
+        peak = max(peak, thread_count(daemon.pid))
+        lines = (s["lyrics"] or {}).get("lines") or []
+        return (
+            s["track"]["title"] == title
+            and lines
+            and lines[0]["text"].startswith(title)
+            and s["track"]["art"]  # the newest track's palette job finished
+        )
+
+    harness.wait(settled, timeout=15)
+    # lyrics and palette work: at most 2 + 1 workers above the idle daemon
+    assert peak - baseline <= 3, (baseline, peak)
