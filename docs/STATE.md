@@ -14,7 +14,7 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 - The overlay, glow and player start the daemon on demand when it is not answering (DECISIONS #20).
 - hyprlock `Encore.conf`: art, title, artist, word-highlighted line.
 - Upstream fragments: schema and config toml, `variables.encore.lua` (hc.start), `key_binds.encore.lua` (SUPER+ALT+{L,K,M,E}), `window_rules.encore.lua` (player floats).
-- 254 unit tests, ruff clean; `tests/e2e/fake_mpris.py` scriptable MPRIS player; `tests/tools/calibrate_timing.py` scores the estimator against cached word sync.
+- 263 unit tests, ruff clean; `tests/e2e/fake_mpris.py` scriptable MPRIS player; `tests/tools/calibrate_timing.py` scores the estimator against cached word sync.
 
 ## Measured (this laptop, 2026-11-03/04)
 - Daemon: playing ~0.4% of a core, ~40 MB RSS; paused 0 ticks over 10 s.
@@ -31,6 +31,7 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 ## Unverified on screen
 - Player lyrics list with a real synced song, art hover-expand, glow following the Settings popover live.
 - Overlay click-through press test; a full-resolution pixel pass of each style against `.reference/`.
+- Login autostart: the `hl.on("hyprland.start", ...)` hook from README sits in the owner's `~/.config/hypr/hyprland.lua` (2026-11-04); first proof is the next login.
 
 ## Broken or placebo
 - Glow popover Display picker only posts a notification; nothing moves.
@@ -47,7 +48,6 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 - Multi-monitor: overlay picks one output (`overlay.monitor`), glow takes the compositor's choice.
 - Colors following the active HyDE theme (wallbash template for encore) and the opt-in `follow_album` full-theme recolor.
 - Glow autostart; only the overlay has an `enable` key.
-- Login autostart on this laptop: needs the `hl.on("hyprland.start", ...)` line from README in `~/.config/hypr/hyprland.lua` (owner adds it).
 
 ## Next
 - Layer 2: bounded fetch pool, real playback rate, isolated harness in `tests/e2e/` (private `dbus-run-session` bus plus a short private runtime dir under `/run/user/$UID`, since AF_UNIX paths cap at 108 bytes), pytest E2E of the daemon against `fake_mpris.py`.

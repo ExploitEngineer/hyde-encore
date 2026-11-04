@@ -28,7 +28,7 @@ Goal: match, then beat, the reference apps Verci and Lumn, then upstream PRs to 
 
 ## Architecture
 - `Configs/.local/lib/hyde/encorelib/`: pure logic, unit-tested, no `gi`.
-  Engine: model, lrc, words (CJK-aware tokens), timing, clock, providers, query (LRCLIB search variants), lookup, cache, palette, protocol, session, config.
+  Engine: model, lrc, words (CJK-aware tokens), timing, clock, providers, query (LRCLIB search variants), lookup, cache, palette, protocol, session, config, service (find or start the daemon).
   View logic: look (runtime look file), profiles, stream (socket decoding, style list), lyricview, wordrects, constellation, glyphs, single (pidfile lock).
 - `Configs/.local/lib/hyde/encore.py`: GLib/Playerctl daemon and CLI; `encore.sh` is the hyde-shell entry (sets LD_PRELOAD for `overlay` and `glow`).
 - `Configs/.local/lib/hyde/encoregui/`: GTK4 processes, each separate from the daemon: `overlay.py` (layer-shell lyrics, plus the visual-style art layer), `glow.py` (one full-screen edge-glow window), `player.py` (normal app window `org.hyde.encore.player` with the look menu and glow popover).
