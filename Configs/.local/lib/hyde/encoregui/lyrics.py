@@ -93,6 +93,7 @@ class LineRaster:
         scale: int,
         rest: tuple[float, float, float] = (1.0, 1.0, 1.0),
         rest_alpha: float = 0.42,
+        align: Pango.Alignment = Pango.Alignment.CENTER,
     ):
         self.scale = scale
         layout_width = width * Pango.SCALE
@@ -108,7 +109,7 @@ class LineRaster:
         layout.set_attributes(attrs)
         layout.set_width(layout_width)
         layout.set_wrap(Pango.WrapMode.WORD)
-        layout.set_alignment(Pango.Alignment.CENTER)
+        layout.set_alignment(align)
         layout.set_text(text, -1)
         _, logical = layout.get_pixel_extents()
         self.pad = max(6, size // 5)  # room for the baked shadow and bloom

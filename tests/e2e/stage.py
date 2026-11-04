@@ -183,6 +183,7 @@ def main() -> int:
     parser.add_argument("--cover", default="", help="cover image (default: newest cached)")
     parser.add_argument("--no-player", action="store_true", help="no music player: the idle screen")
     parser.add_argument("--no-lyrics", action="store_true", help="no lyrics for the song")
+    parser.add_argument("--long-lyrics", action="store_true", help="a 200-line song")
     parser.add_argument(
         "--stop-player", action="store_true", help="close the player once the app is open"
     )
@@ -199,7 +200,13 @@ def main() -> int:
         # which makes GtkApplication registration fail and the surface exit
         h.env.update(ENCORE_OVERLAY_MONITOR=LAB, ENCORE_GLOW_MONITOR=LAB, GTK_A11Y="none")
         h.env["ENCORE_FULL_HIDE_MS"] = "600000"  # stills show the full-screen bars
-        if not args.no_lyrics:
+        if args.long_lyrics:
+            long_lrc = "".join(
+                f"[{t // 60:02d}:{t % 60:02d}.00]Line {i + 1} of a very long song that keeps on going\n"
+                for i, t in enumerate(range(1, 401, 2))
+            )
+            h.write_lrc(args.artist or ARTIST, args.title or TITLE, long_lrc)
+        elif not args.no_lyrics:
             h.write_lrc(args.artist or ARTIST, args.title or TITLE, LRC)
         cover = Path(args.cover) if args.cover else default_cover(Path(tmp))
         player = None

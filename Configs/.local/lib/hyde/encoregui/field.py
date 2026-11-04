@@ -25,8 +25,8 @@ from encoregui.cover import load_texture
 from encoregui.scene import Image, Scene
 from encorelib.motion import blob_center, grain_texture_bytes
 
-PLAY_FPS = 4  # the blobs move a few px/s: 4 fps reads as continuous
-IDLE_FPS = 6
+PLAY_FPS = 1  # the blobs move a few px/s under an 80 px blur: steps are invisible at 1 fps
+IDLE_FPS = 3
 BLUR = 80
 WASH = 0.68  # black over the blurred cover, so type reads on any art
 BASE = (0.078, 0.075, 0.09)
@@ -54,6 +54,7 @@ class AlbumField(Gtk.Widget):
         self.path = ""
         self.texture: Gdk.Texture | None = None
         self.blurred: tuple[tuple, Gdk.Texture] | None = None
+        self.light: tuple[tuple, Gdk.Texture] | None = None  # the blobs, at quarter size
         self.grain: Gdk.Texture | None = None
         self.playing = False
         self.motion = True
@@ -161,6 +162,46 @@ class AlbumField(Gtk.Widget):
         self.blurred = (key, blurred)
         return blurred
 
+    def _light_texture(self, w: float, h: float, t: float, strength: float) -> Gdk.Texture | None:
+        """The three blobs rendered at quarter size, once per drift step: a paint then
+        costs one texture draw instead of three full-window gradients."""
+        fps = PLAY_FPS if self.texture is not None else IDLE_FPS
+        key = (int(t * fps), round(strength, 2), id(self.colors), int(w), int(h))
+        if self.light is not None and self.light[0] == key:
+            return self.light[1]
+        native = self.get_native()
+        renderer = native.get_renderer() if native is not None else None
+        if renderer is None or self.colors is None:
+            return None
+        qw, qh = max(1, int(w / 4)), max(1, int(h / 4))
+        snapshot = Gtk.Snapshot()
+        side = max(qw, qh)
+        for key_name, size, center, orbit, period, phase in BLOBS:
+            fx, fy = blob_center(t, orbit, period, phase, center)
+            radius = side * size
+            color = getattr(self.colors, key_name)
+            stops = []
+            for offset, alpha in ((0.0, 0.34 * strength), (0.45, 0.14 * strength), (1.0, 0.0)):
+                stop = Gsk.ColorStop()
+                stop.offset = offset
+                stop.color = _rgba(color, min(1.0, alpha))
+                stops.append(stop)
+            snapshot.append_radial_gradient(
+                Graphene.Rect().init(0, 0, qw, qh),
+                Graphene.Point().init(fx * qw, fy * qh),
+                radius,
+                radius,
+                0.0,
+                1.0,
+                stops,
+            )
+        node = snapshot.to_node()
+        if node is None:
+            return None
+        texture = renderer.render_texture(node, Graphene.Rect().init(0, 0, qw, qh))
+        self.light = (key, texture)
+        return texture
+
     def _grain(self) -> Gdk.Texture:
         if self.grain is None:
             data = GLib.Bytes.new(grain_texture_bytes(128))
@@ -180,29 +221,12 @@ class AlbumField(Gtk.Widget):
             sc.cover(Image(blurred, w, h), 0, 0, w, h)
         if self.colors is not None:
             t = (time.monotonic() - self.start) if self.motion else 0.0
-            side = max(w, h)
             # over a cover the blobs are a glow; without one they are the light itself
             strength = (0.42 if blurred is not None else 1.0) * self.strength
             strength *= 1.0 + 0.5 * self.hover
-            for key, size, center, orbit, period, phase in BLOBS:
-                fx, fy = blob_center(t, orbit, period, phase, center)
-                radius = side * size
-                color = getattr(self.colors, key)
-                stops = []
-                for offset, alpha in ((0.0, 0.34 * strength), (0.45, 0.14 * strength), (1.0, 0.0)):
-                    stop = Gsk.ColorStop()
-                    stop.offset = offset
-                    stop.color = _rgba(color, min(1.0, alpha))
-                    stops.append(stop)
-                snapshot.append_radial_gradient(
-                    Graphene.Rect().init(0, 0, w, h),
-                    Graphene.Point().init(fx * w, fy * h),
-                    radius,
-                    radius,
-                    0.0,
-                    1.0,
-                    stops,
-                )
+            light = self._light_texture(w, h, t, strength)
+            if light is not None:
+                sc.cover(Image(light, w, h), 0, 0, w, h)
         # a fine static grain, so the light never bands (its strength is baked in)
         snapshot.push_repeat(Graphene.Rect().init(0, 0, w, h), Graphene.Rect().init(0, 0, 128, 128))
         snapshot.append_texture(self._grain(), Graphene.Rect().init(0, 0, 128, 128))

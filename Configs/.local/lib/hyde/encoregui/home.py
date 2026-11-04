@@ -20,9 +20,10 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib, Gtk
 
 from encoregui.cover import CoverView
+from encoregui.lyriclist import LyricList
 from encoregui.ui import icon_button, icon_image, set_icon
 from encorelib.journal import read_lines
-from encorelib.lyricview import live_position, lyric_row
+from encorelib.lyricview import live_position
 from encorelib.screen import lookup_reason, pick_music_apps, screen_state
 from encorelib.transport import fmt_time
 
@@ -33,6 +34,7 @@ PAUSED_ALPHA = 0.85
 SEEK_DEBOUNCE_MS = 150
 VOLUME_DEBOUNCE_MS = 80
 HOLD_AFTER_INPUT = 1.0  # seconds the user's own value wins over the state's
+PAD_MESSAGE = 6
 
 
 def cover_path(state: dict) -> str:
@@ -393,9 +395,7 @@ class LyricsPage(Gtk.Box):
         self.win = win
         self.set_valign(Gtk.Align.CENTER)
         self.set_halign(Gtk.Align.CENTER)
-        self.rows: list[Gtk.Label] = []
         self.key = ""
-        self.current = -1
         card = Gtk.Box(spacing=28)
         card.add_css_class("card")
         card.set_size_request(820, 380)
@@ -431,107 +431,51 @@ class LyricsPage(Gtk.Box):
         sep = Gtk.Box()
         sep.add_css_class("vsep")
         card.append(sep)
-        self.scroller = Gtk.ScrolledWindow()
-        self.scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
-        self.scroller.set_hexpand(True)
-        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        self.box.set_margin_top(120)
-        self.box.set_margin_bottom(220)
-        self.scroller.set_child(self.box)
-        card.append(self.scroller)
+        self.right = Gtk.Stack()
+        self.right.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.right.set_transition_duration(220)
+        self.right.set_hexpand(True)
+        self.list = LyricList(win.cfg.overlay_font.split(",")[0].strip() or "SF Pro Display")
+        self.list.on_seek = win.seek_to
+        self.right.add_named(self.list, "list")
+        self.message = Gtk.Label(label="", xalign=0)
+        self.message.add_css_class("lyric")
+        self.message.add_css_class("message")
+        self.message.set_wrap(True)
+        self.message.set_max_width_chars(36)
+        self.message.set_valign(Gtk.Align.CENTER)
+        self.message.set_margin_start(PAD_MESSAGE)
+        self.right.add_named(self.message, "message")
+        card.append(self.right)
 
-    def update(self, state: dict, _colors) -> None:
+    def update(self, state: dict, colors) -> None:
         set_meta(self.title, self.artist, state)
         self.seek.update(state)
         self.transport.update(state)
         self.cover.set_path(cover_path(state))
         self.cover.set_alpha(PAUSED_ALPHA if state.get("status") == "paused" else 1.0)
+        self.list.set_colors(colors)
         self._sync_lines(state)
-
-    def _clear(self) -> None:
-        child = self.box.get_first_child()
-        while child is not None:
-            nxt = child.get_next_sibling()
-            self.box.remove(child)
-            child = nxt
-        self.rows = []
-        self.current = -1
-
-    def _message(self, text: str) -> None:
-        label = Gtk.Label(label=text, xalign=0)
-        label.add_css_class("lyric")
-        label.add_css_class("message")
-        label.set_wrap(True)
-        label.set_max_width_chars(36)
-        self.box.append(label)
 
     def _sync_lines(self, state: dict) -> None:
         mode = screen_state(state, time.monotonic())
         track = state.get("track") or {}
         lyrics = state.get("lyrics") or {}
-        lines = [ln for ln in lyrics.get("lines") or [] if (ln.get("text") or "").strip()]
-        key = f"{track.get('key', '')}:{mode}:{len(lines)}"
-        if key != self.key:
-            self.key = key
-            self._clear()
-            if mode == "idle":
-                self._message("Nothing playing.")
-            elif mode == "waiting":
-                self._message("Looking for lyrics…")
-            elif mode == "no_lyrics":
-                journal = read_lines(self.win.journal_path)
-                self._message(
-                    lookup_reason(journal, track.get("artist") or "", track.get("title") or "")
-                )
-            else:
-                for line in lines:
-                    label = Gtk.Label(label=line["text"], xalign=0)
-                    label.add_css_class("lyric")
-                    label.set_wrap(True)
-                    label.set_max_width_chars(36)
-                    if mode == "lyrics":  # synced: a click seeks to the line
-                        label.add_css_class("seekable")
-                        label.set_cursor_from_name("pointer")
-                        start = float(line.get("start") or 0)
-                        click = Gtk.GestureClick()
-                        click.connect("released", lambda *_a, at=start: self.win.seek_to(at))
-                        label.add_controller(click)
-                    self.box.append(label)
-                    self.rows.append(label)
-        if mode != "lyrics":
+        if mode in ("lyrics", "plain"):
+            self.list.set_lines(lyrics.get("lines") or [], f"{track.get('key', '')}:{mode}")
+            self.list.set_state(state)
+            self.right.set_visible_child_name("list")
             return
-        index = lyric_row(state)
-        if index != self.current and self.rows:
-            self.current = index
-            for i, row in enumerate(self.rows):
-                row.remove_css_class("current")
-                row.remove_css_class("near")
-                if i == index:
-                    row.add_css_class("current")
-                elif abs(i - index) == 1:
-                    row.add_css_class("near")
-            self.scroll_to_current(False)
+        if mode == "idle":
+            text = "Nothing playing."
+        elif mode == "waiting":
+            text = "Looking for lyrics…"
+        else:
+            journal = read_lines(self.win.journal_path)
+            text = lookup_reason(journal, track.get("artist") or "", track.get("title") or "")
+        if self.message.get_label() != text:
+            self.message.set_label(text)
+        self.right.set_visible_child_name("message")
 
     def scroll_to_current(self, instant: bool) -> None:
-        if not self.rows or not (0 <= self.current < len(self.rows)):
-            return
-        ok, rect = self.rows[self.current].compute_bounds(self.box)
-        if not ok:
-            return
-        adj = self.scroller.get_vadjustment()
-        target = max(0.0, rect.get_y() - 120)
-        if instant:
-            adj.set_value(target)
-            return
-        start = adj.get_value()
-        steps = 10
-        counter = {"i": 0}
-
-        def step():
-            counter["i"] += 1
-            t = counter["i"] / steps
-            eased = 1 - (1 - t) ** 3
-            adj.set_value(start + (target - start) * eased)
-            return counter["i"] < steps
-
-        GLib.timeout_add(16, step)
+        self.list.scroll_to_current(instant)
