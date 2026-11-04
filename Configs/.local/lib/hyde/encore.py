@@ -33,6 +33,7 @@ if _hyde_lib not in sys.path:
     sys.path.append(_hyde_lib)
 
 import pyutils.logger as hyde_logger
+from encorelib.artwork import hd_art
 from encorelib.cache import LyricsCache
 from encorelib.clock import PlaybackClock, clean_rate
 from encorelib.config import EncoreConfig, load_config
@@ -106,11 +107,16 @@ class Encore:
         # skipping through songs only ever needs the newest track's work
         self.lyrics_jobs = LatestJobs(workers=2)
         self.palette_jobs = LatestJobs(workers=1)
+        # HD downloads can take seconds on a slow link: their own worker, so
+        # the next song's colors never queue behind them
+        self.hd_jobs = LatestJobs(workers=1)
         self.player = None
         self.track: TrackInfo | None = None
         self.art_url = ""
         self.lyrics = None
-        self.art: Path | None = None
+        self.art: Path | None = None  # the 512 px PNG lock copy
+        self.cover: Path | None = None  # the best full-size cover (HD when found)
+        self.hd_covers = cfg.hd_covers
         self.palette: dict[str, str] = wallpaper_palette()
         self.theme = wallpaper_palette()  # the HyDE theme, for grey covers
         self.shown_cover: Path | None = None
@@ -262,7 +268,7 @@ class Encore:
         found = self.read_track()
         if found is None:
             if self.track is not None:
-                self.track, self.lyrics, self.art = None, None, None
+                self.track, self.lyrics, self.art, self.cover = None, None, None, None
                 self.lyrics_gate.begin("")
                 self.palette_gate.begin("")
             return
@@ -276,7 +282,7 @@ class Encore:
                 self.start_palette(info, art_url)
             return
         self.track, self.art_url = info, art_url
-        self.lyrics, self.art, self.last_cursor = None, None, None
+        self.lyrics, self.art, self.cover, self.last_cursor = None, None, None, None
         token = self.lyrics_gate.begin(track_key(info))
         self.lyrics_jobs.submit(lambda: self.fetch_lyrics(info, token))
         self.start_palette(info, art_url)
@@ -320,7 +326,8 @@ class Encore:
         token = self.palette_gate.begin(track_key(info))
 
         def work():
-            art, palette = None, {}
+            key = track_key(info)
+            art, palette, original = None, {}, None
             try:
                 original = fetch_art(art_url, CACHE_DIR / "art")
                 if original:
@@ -328,16 +335,45 @@ class Encore:
                     art = cover_png(original, CACHE_DIR / "covers") or original
             except Exception:
                 log.exception("album palette failed")
-            self.GLib.idle_add(self.apply_palette, token, track_key(info), art, palette)
+            self.GLib.idle_add(self.apply_palette, token, key, art, palette, original)
+            self.hd_jobs.submit(lambda: hd_work(key, original))
+
+        def hd_work(key: str, original):
+            try:
+                hd = hd_art(
+                    art_url,
+                    original,
+                    info.artist,
+                    info.album,
+                    info.title,
+                    CACHE_DIR / "hd",
+                    apple=self.hd_covers,
+                )
+                if hd is not None and original is None:
+                    # a player without a cover: Apple's still gives the colors
+                    palette = album_palette(hd, CACHE_DIR / "palette")
+                    art = cover_png(hd, CACHE_DIR / "covers")
+                    self.GLib.idle_add(self.apply_palette, token, key, art, palette, hd)
+                elif hd is not None:
+                    self.GLib.idle_add(self.apply_cover, token, key, hd)
+            except Exception:
+                log.exception("HD cover failed")
 
         self.palette_jobs.submit(work)
 
-    def apply_palette(self, token: int, key: str, art, palette) -> bool:
+    def apply_palette(self, token: int, key: str, art, palette, cover) -> bool:
         if self.palette_gate.accept(token, key):
             self.art = art
+            self.cover = cover
             self.theme = wallpaper_palette()  # once per track: wallpaper or theme may change
             self.palette = palette or self.theme
             self.last_cursor = None
+            self.publish()
+        return False
+
+    def apply_cover(self, token: int, key: str, cover) -> bool:
+        if self.palette_gate.accept(token, key):
+            self.cover = cover
             self.publish()
         return False
 
@@ -403,7 +439,15 @@ class Encore:
         write_atomic(TRACK_PATH, hyprlock_track(self.track))
         self.show_cover()
         self.server.broadcast(
-            build_state(self.status(), self.track, self.art, self.lyrics, self.clock, self.palette)
+            build_state(
+                self.status(),
+                self.track,
+                self.art,
+                self.lyrics,
+                self.clock,
+                self.palette,
+                cover=self.cover,
+            )
         )
 
 

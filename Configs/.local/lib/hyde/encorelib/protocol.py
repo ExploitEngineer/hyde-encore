@@ -29,7 +29,9 @@ def build_state(
     lyrics: Lyrics | None,
     clock: PlaybackClock,
     palette: dict[str, str],
+    cover: Path | None = None,
 ) -> dict:
+    """The state line; `art` is the 512 px lock copy, `cover` the best full-size cover."""
     position, ts = clock.anchor()
     line = nxt = gap = None
     if lyrics is not None and lyrics.sync != "none":
@@ -67,6 +69,7 @@ def build_state(
                 "album": track.album,
                 "length": track.length,
                 "art": str(art) if art else None,
+                "cover": str(cover or art) if (cover or art) else None,
             }
             if track
             else None

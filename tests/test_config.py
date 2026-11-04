@@ -52,6 +52,12 @@ def test_false_boolean(tmp_path):
     assert cfg.lrclib is False
 
 
+def test_hd_covers_default_on_and_env_off(tmp_path):
+    assert load_config(env=HOME, env_file=tmp_path / "x").hd_covers is True
+    cfg = load_config(env={**HOME, "ENCORE_HD_COVERS": "false"}, env_file=tmp_path / "x")
+    assert cfg.hd_covers is False
+
+
 def test_players_comma_list(tmp_path):
     cfg = load_config(env={**HOME, "ENCORE_PLAYERS": "spotify, mpv"}, env_file=tmp_path / "x")
     assert cfg.players == ("spotify", "mpv")

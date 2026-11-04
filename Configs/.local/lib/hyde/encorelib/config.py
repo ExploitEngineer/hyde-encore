@@ -39,6 +39,7 @@ class EncoreConfig:
     overlay_monitor: str = ""
     overlay_style: str = "line"
     glow_monitor: str = ""
+    hd_covers: bool = True
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -150,4 +151,5 @@ def load_config(env: Mapping[str, str] | None = None, env_file: Path | None = No
         overlay_monitor=_unquote(get("ENCORE_OVERLAY_MONITOR") or ""),
         overlay_style=_as_choice(get("ENCORE_OVERLAY_STYLE"), STYLES, "line"),
         glow_monitor=_unquote(get("ENCORE_GLOW_MONITOR") or ""),
+        hd_covers=_as_bool(get("ENCORE_HD_COVERS"), True),
     )

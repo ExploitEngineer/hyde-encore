@@ -9,6 +9,7 @@ encore = "hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-encore.service -t service 
 [encore]
 enable = false  # Start the encore service with the session.
 players = []  # Only follow these MPRIS players, e.g. ["spotify"]. Empty follows any player.
+hd_covers = true  # Look up HD album covers on Apple Music's public catalog when the player's cover is small. Spotify covers come in HD from Spotify itself.
 
 # encore lyrics sources.
 [encore.lyrics]

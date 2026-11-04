@@ -23,6 +23,11 @@ type = "array"
 [properties.encore.properties.players.items]
 type = "string"
 
+[properties.encore.properties.hd_covers]
+default = true
+description = "Look up HD album covers on Apple Music's public catalog when the player's cover is small. Spotify covers come in HD from Spotify itself."
+type = "boolean"
+
 [properties.encore.properties.lyrics]
 description = "encore lyrics sources."
 type = "object"
