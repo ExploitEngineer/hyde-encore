@@ -38,7 +38,7 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 - Glow popover Display picker only posts a notification; nothing moves.
 - Player bottom bar: the display button cycles the style and the lock button previews hyprlock; neither matches the reference.
 - Polish, parity, setup and player branches shipped without an independent review.
-- Perf over the ~6.5% overlay budget on dense lyrics: stack, visual and constellation (GTK composites a full-screen canvas per animation frame; GPU renderers measured 2-3x worse), line slightly over; glow over the 5% design target.
+- Perf over the ~6.5% overlay budget on dense lyrics: stack, visual and constellation (CPU rescaling of big type on slide frames, DECISIONS #27), line slightly over; glow over the 5% design target. Measure only on a quiet machine.
 
 ## Not built
 - Multi-monitor: overlay and glow each pin to one output (`overlay.monitor`, `glow.monitor`); no per-monitor copies yet.
@@ -46,7 +46,7 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 - Glow autostart; only the overlay has an `enable` key.
 
 ## Next
-- Overlay perf: dirty-region drawing for the column styles and constellation to get under budget.
+- Overlay perf: move drawing to snapshot texture nodes so the renderer scales words on the GPU (DECISIONS #27), then re-measure on a quiet machine.
 - Motion timing against the official videos (clips via `stage.py --clip`), player bottom-bar behaviour, multi-monitor copies, lock screen, independent review.
 
 ## Known facts
