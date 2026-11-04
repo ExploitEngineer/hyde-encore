@@ -57,6 +57,18 @@ def _rect(x: float, y: float, w: float, h: float) -> Graphene.Rect:
     return Graphene.Rect().init(x, y, w, h)
 
 
+def rounded(x: float, y: float, w: float, h: float, r: float) -> Gsk.RoundedRect:
+    """A rounded rect for snapshot calls.
+
+    Initialize in place and keep the instance: PyGObject's return value of
+    Gsk.RoundedRect().init_from_rect() is not the initialized struct, so
+    clips built from it came out empty and shadows landed at the origin.
+    """
+    rect = Gsk.RoundedRect()
+    rect.init_from_rect(_rect(x, y, w, h), r)
+    return rect
+
+
 def _rgba(rgb, alpha: float) -> Gdk.RGBA:
     color = Gdk.RGBA()
     color.red, color.green, color.blue, color.alpha = rgb[0], rgb[1], rgb[2], alpha
@@ -123,8 +135,7 @@ class Scene:
 
     @contextmanager
     def rounded_clip(self, x: float, y: float, w: float, h: float, r: float) -> Iterator[None]:
-        rounded = Gsk.RoundedRect().init_from_rect(_rect(x, y, w, h), r)
-        self.s.push_rounded_clip(rounded)
+        self.s.push_rounded_clip(rounded(x, y, w, h, r))
         try:
             yield
         finally:
@@ -192,5 +203,5 @@ class Scene:
 
     def shadow(self, x, y, w, h, r, alpha: float, dy: float = 6.0, blur: float = 30.0) -> None:
         """A soft drop shadow outside a rounded box (drawn by the GPU)."""
-        rounded = Gsk.RoundedRect().init_from_rect(_rect(x, y, w, h), r)
-        self.s.append_outset_shadow(rounded, _rgba((0, 0, 0), alpha), 0.0, dy, 0.0, blur)
+        box = rounded(x, y, w, h, r)
+        self.s.append_outset_shadow(box, _rgba((0, 0, 0), alpha), 0.0, dy, 0.0, blur)
