@@ -71,6 +71,7 @@ TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
 OVERLAY_PIDFILE = RUNTIME_DIR / "encore-overlay.pid"
 LOOK_PATH = RUNTIME_DIR / "encore.look"
 LOOK_STATE = state_look_path()  # the look kept across reboots
+STATERC_PATH = LOOK_STATE.parent / "staterc"  # HyDE's own state (hyprlock layout)
 FOLLOW_PATH = RUNTIME_DIR / "encore.follow"  # a player the user picked by hand
 GLOW_PIDFILE = RUNTIME_DIR / "encore-glow.pid"
 LOOKUPS_PATH = RUNTIME_DIR / "encore.lookups"  # the last 50 lyric lookups
@@ -624,7 +625,7 @@ def run_glow_toggle() -> int:
     return 0
 
 
-APP_PAGES = ("home", "lyrics", "full")
+APP_PAGES = ("home", "lyrics", "full", "look", "settings")
 
 
 def run_app_cmd(page: str | None = None) -> int:
@@ -692,6 +693,37 @@ def run_follow(name: str) -> int:
         return 0
     write_atomic(FOLLOW_PATH, name + "\n")
     print(f"encore follows {name}")
+    return 0
+
+
+def run_lock(action: str) -> int:
+    """Lyrics on the lock screen: on, off (restoring the previous layout), preview, status."""
+    from encorelib.lockscreen import DEFAULT_LAYOUT, ENCORE_LAYOUT, read_layout, with_layout
+
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "timeout": 60}
+    if action == "preview":
+        subprocess.run(["hyde-shell", "hyprlock.sh", "--test", ENCORE_LAYOUT], check=False, **quiet)
+        return 0
+    try:
+        text = STATERC_PATH.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    current = read_layout(text) or DEFAULT_LAYOUT
+    if action == "status":
+        print("on" if current == ENCORE_LAYOUT else "off")
+        return 0
+    if action == "on":
+        if current != ENCORE_LAYOUT:  # remember what to go back to, once
+            update_look(LOOK_PATH, persist=LOOK_STATE, lock_previous=current)
+        layout = ENCORE_LAYOUT
+    else:
+        layout = read_look(LOOK_PATH).get("lock_previous") or DEFAULT_LAYOUT
+        if layout == ENCORE_LAYOUT:
+            layout = DEFAULT_LAYOUT
+        update_look(LOOK_PATH, persist=LOOK_STATE, lock_previous=None)
+    write_atomic(STATERC_PATH, with_layout(text, layout))
+    subprocess.run(["hyde-shell", "hyprlock.sh", "--reload"], check=False, **quiet)
+    print(f"lock screen lyrics {action}")
     return 0
 
 
@@ -939,6 +971,8 @@ def main(argv: list[str] | None = None) -> int:
     profile = sub.add_parser("profile", help="apply a sound setup: working or show")
     profile.add_argument("name", help="working | show")
     sub.add_parser("show", help="toggle the show workspace (full show on an empty stage)")
+    lock = sub.add_parser("lock", help="lyrics on the lock screen: on, off, preview, status")
+    lock.add_argument("action", choices=("on", "off", "preview", "status"))
     follow = sub.add_parser("follow", help="follow one player, or 'auto' for the most recent")
     follow.add_argument("name", help="an MPRIS player name (e.g. spotify), or auto")
     sub.add_parser("status", help="print the current state as JSON")
@@ -980,6 +1014,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"{r.get('at', ''):8}  {r.get('player', ''):14.14}  {who[:60]:60}  {r.get('result')}"
             )
         return 0
+    if args.command == "lock":
+        return run_lock(args.action)
     if args.command == "follow":
         return run_follow(args.name)
     if args.command == "status":

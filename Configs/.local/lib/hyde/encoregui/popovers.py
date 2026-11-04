@@ -2,8 +2,9 @@
 
 The look menu (palette button): lyric style, font, text size and the three
 lyric colors. The Settings panel (Settings pill): the edge glow (gradient,
-animation, thickness, glow, override colors, display), the lock screen and
-Quit. Both write the live look file; every surface follows it at once.
+animation, thickness, glow, override colors, display), the lock screen, and
+an Encore section (HD covers, which players to follow, start at login,
+Quit). Both write the live look file; every surface follows it at once.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from gi.repository import Gdk, Gtk
 
 from encoregui.ui import rgba_hex
 from encorelib.look import MAX_SIZE, MIN_SIZE, read_look
+from encorelib.session import player_label
 from encorelib.stream import STYLES
 
 PREFERRED_FONTS = (
@@ -220,7 +222,13 @@ class SettingsPanel:
         panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         panel.add_css_class("panel")
         panel.set_size_request(300, -1)
-        popover.set_child(panel)
+        # taller than the window on small screens: scroll instead of clipping
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_max_content_height(560)
+        scroller.set_child(panel)
+        popover.set_child(scroller)
         self.popover = popover
         self.panel = panel
         title = Gtk.Label(label="encore", xalign=0)
@@ -282,12 +290,43 @@ class SettingsPanel:
         self.display.connect("notify::selected", self._on_display)
         panel.append(self.display)
 
+        lock_row = Gtk.Box(spacing=8)
         self.lock = Gtk.Switch()
         self.lock.set_valign(Gtk.Align.CENTER)
         self.lock.connect("state-set", self._on_lock)
-        _panel_row(panel, "Lock screen player", self.lock)
+        preview = Gtk.Button(label="Preview")
+        preview.add_css_class("pill")
+        preview.set_tooltip_text("Show the Encore lock screen for a moment")
+        preview.connect("clicked", lambda *_: win.encore("lock", "preview"))
+        lock_row.append(preview)
+        lock_row.append(self.lock)
+        _panel_row(panel, "Lock screen lyrics", lock_row)
 
-        quit_button = Gtk.Button(label="Quit encore")
+        _hsep(panel)
+        encore_title = Gtk.Label(label="Encore", xalign=0)
+        encore_title.add_css_class("panel-title")
+        panel.append(encore_title)
+        self.hd = Gtk.Switch()
+        self.hd.set_valign(Gtk.Align.CENTER)
+        self.hd.set_tooltip_text(
+            "Look up sharp covers on Apple Music's catalog when a player's is small"
+        )
+        self.hd.connect("state-set", lambda _s, on: self._set(hd_covers=bool(on)))
+        _panel_row(panel, "HD covers", self.hd)
+        self.autostart = Gtk.Switch()
+        self.autostart.set_valign(Gtk.Align.CENTER)
+        self.autostart.set_tooltip_text("Start the lyrics engine with the session")
+        self.autostart.connect("state-set", lambda _s, on: self._set(autostart=bool(on)))
+        _panel_row(panel, "Start at login", self.autostart)
+        follow_caption = Gtk.Label(label="Follow", xalign=0)
+        follow_caption.add_css_class("row-label")
+        follow_caption.set_margin_top(6)
+        panel.append(follow_caption)
+        self.follow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        panel.append(self.follow_box)
+        self.follow_checks: dict[str, Gtk.CheckButton] = {}
+
+        quit_button = Gtk.Button(label="Quit Encore")
         quit_button.add_css_class("pill")
         quit_button.set_halign(Gtk.Align.START)
         quit_button.set_margin_top(8)
@@ -307,9 +346,62 @@ class SettingsPanel:
             self._set(glow_monitor=names[index])  # the glow moves there at once
 
     def _on_lock(self, _switch, state) -> bool:
-        if not self.syncing and state:
-            self.win.run(["hyde-shell", "hyprlock.sh", "--select"])
+        if not self.syncing:
+            self.win.encore("lock", "on" if state else "off")
         return False
+
+    def _fill_follow(self, look: dict) -> None:
+        """One check per known player; none checked means every player."""
+        child = self.follow_box.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self.follow_box.remove(child)
+            child = nxt
+        self.follow_checks = {}
+        chosen = set(look.get("players") or [])
+        present = [p.split(".", 1)[0] for p in self.win.state.get("players") or []]
+        names = []
+        for name in [*present, *chosen]:
+            if name and name not in names:
+                names.append(name)
+        every = Gtk.CheckButton(label="Every player")
+        every.add_css_class("row-label")
+        every.set_active(not chosen)
+        every.connect("toggled", self._on_every)
+        self.follow_box.append(every)
+        for name in names:
+            check = Gtk.CheckButton(label=player_label(name))
+            check.add_css_class("row-label")
+            check.set_active(name in chosen)
+            check.connect("toggled", lambda _b, n=name: self._toggle_follow(n))
+            self.follow_checks[name] = check
+            self.follow_box.append(check)
+        if not names:
+            hint = Gtk.Label(label="Open a music player to pick from", xalign=0)
+            hint.add_css_class("dim")
+            self.follow_box.append(hint)
+
+    def _on_every(self, button: Gtk.CheckButton) -> None:
+        if self.syncing or not button.get_active():
+            return
+        self.syncing = True
+        try:
+            for check in self.follow_checks.values():
+                check.set_active(False)
+        finally:
+            self.syncing = False
+        self._set(players=[])
+
+    def _toggle_follow(self, name: str) -> None:
+        if self.syncing:
+            return
+        chosen = [n for n, c in self.follow_checks.items() if c.get_active()]
+        self._set(players=chosen)
+        self.syncing = True
+        try:
+            self.follow_box.get_first_child().set_active(not chosen)  # "Every player"
+        finally:
+            self.syncing = False
 
     def sync(self) -> None:
         look = read_look(self.win.look_path)
@@ -326,6 +418,10 @@ class SettingsPanel:
             for key, button in self.pickers.items():
                 default = "#6B7CE8" if key == "glow_primary" else "#C86BE8"
                 _set_rgba(button, look.get(key) or default)
+            self.lock.set_active(self.win.lock_on)
+            self.hd.set_active(look.get("hd_covers", self.win.cfg.hd_covers))
+            self.autostart.set_active(look.get("autostart", False))
+            self._fill_follow(look)
         finally:
             self.syncing = False
 

@@ -31,6 +31,7 @@ from encoregui.popovers import build_look_menu, build_settings_popover
 from encoregui.ui import accent_rules, hex_rgb, icon_button, icon_image, install_css
 from encorelib.colors import scheme as color_scheme
 from encorelib.config import load_config
+from encorelib.lockscreen import ENCORE_LAYOUT, read_layout
 from encorelib.look import state_look_path, update_look
 from encorelib.palette import wallpaper_palette
 from encorelib.protocol import read_state
@@ -43,6 +44,7 @@ APP_ID = os.environ.get("ENCORE_APP_ID", "org.hyde.encore")
 ENCORE_PY = str(Path(__file__).resolve().parent.parent / "encore.py")
 POLL_MS = 400
 PAGES = ("home", "lyrics", "full")
+POPOVERS = ("look", "settings")  # --open names that mean Home with that popover up
 RECONNECT_AFTER = 1.0  # seconds without an answer before saying so
 SEEK_STEP = 5
 VOLUME_STEP = 0.05
@@ -54,6 +56,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.runtime_dir = runtime_dir
         self.look_path = f"{runtime_dir}/encore.look"
         self.look_state = state_look_path()  # every change is kept for the next boot
+        self.staterc = self.look_state.parent / "staterc"  # HyDE's hyprlock layout choice
         self.sock_path = f"{runtime_dir}/encore.sock"
         self.journal_path = f"{runtime_dir}/encore.lookups"
         self.cfg = load_config()
@@ -115,6 +118,11 @@ class EncoreWindow(Gtk.ApplicationWindow):
     # pages ------------------------------------------------------------------
 
     def show_page(self, name: str) -> None:
+        if name in POPOVERS:
+            popover = self.look_menu if name == "look" else self.settings
+            self.show_page("home")
+            GLib.timeout_add(400, lambda: (popover.popup(), False)[1])
+            return
         if name not in PAGES:
             name = "home"
         leaving_full = self.page == "full" and name != "full"
@@ -376,6 +384,11 @@ class EncoreWindow(Gtk.ApplicationWindow):
                 ).start()
 
     def _sync_toggles(self) -> None:
+        try:
+            layout = read_layout(self.staterc.read_text(encoding="utf-8"))
+        except OSError:
+            layout = None
+        self.lock_on = layout == ENCORE_LAYOUT
         states = {
             "desktop": self.running("encore-overlay.pid"),
             "glow": self.running("encore-glow.pid"),
