@@ -160,9 +160,32 @@ class StateServer:
         except BlockingIOError:
             return
         client.setblocking(False)
+        self._drop_hung_up()
         if self.last is not None and not self._send(client, self.last):
             return
         self.clients.append(client)
+
+    def _drop_hung_up(self) -> None:
+        """Close clients that went away since the last broadcast.
+
+        Pollers (the player window, `encore status`, hyprlock helpers) connect,
+        read one line and leave; while paused nothing is broadcast, so without
+        this their sockets piled up until the daemon hit the fd limit and died.
+        Clients never write, so an empty peek means the peer closed.
+        """
+        alive = []
+        for client in self.clients:
+            try:
+                gone = client.recv(1, socket.MSG_PEEK) == b""
+            except BlockingIOError:
+                gone = False
+            except OSError:
+                gone = True
+            if gone:
+                client.close()
+            else:
+                alive.append(client)
+        self.clients = alive
 
     def _send(self, client: socket.socket, data: bytes) -> bool:
         try:
