@@ -81,6 +81,7 @@ Real gaps from a line's last word to the next line: median 0.27 s, p99 6.5 s, so
 HyDE's `start_up.lua` runs a fixed list of `hc.start` keys in its `hyprland.start` handler and never iterates the table, so `hc.start.encore` and `[desktop.start] encore` were never executed: encore had never autostarted, and after a fresh login every surface stayed empty while Spotify played.
 `toggle`, `glow` and the player now start the daemon when its socket does not answer, as the same `hyde-<desktop>-encore.service` unit (not gated on `enable`, since the user asked for a surface), falling back to a detached `encore.py daemon` when `hyde-shell` or the unit fails.
 Login autostart is a `hl.on("hyprland.start", ...)` line in the user's `hyprland.lua` here, and `check_exec(hs.encore)` in `start_up.lua` in the upstream PR.
+On-demand starts run from `$HOME` (HyDE's `app2unit` uses `--same-dir`, and a vanished working directory made every restart fail at CHDIR) and clear a failed unit of the same name first.
 
 ## 21. 2026-11-04 - Daemon fetches run on latest-wins workers - Active
 Every track change started a lyrics thread and a palette thread; six fast skips with slow palette work took the daemon from 4 to 10 threads.
