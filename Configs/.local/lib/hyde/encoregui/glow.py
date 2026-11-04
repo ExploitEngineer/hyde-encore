@@ -26,6 +26,7 @@ from gi.repository import Gtk4LayerShell as LayerShell
 
 from encoregui.outputs import place_on
 from encorelib.config import EncoreConfig
+from encorelib.glowfield import comet_strength, edge_mix, falloff_stops, perimeter_u
 from encorelib.look import read_look
 from encorelib.palette import pick_accent
 from encorelib.stream import LineDecoder
@@ -317,7 +318,7 @@ class Glow:
             cr.rectangle(x, y, w, h)
             cr.clip()
             cr.translate(x, y)
-            self._paint_strip(cr, w, h, name)
+            self._paint_strip(cr, w, h, name, small_w, small_h)
             cr.restore()
         surface.flush()
         data = GLib.Bytes.new(bytes(surface.get_data()))
@@ -325,7 +326,7 @@ class Glow:
             small_w, small_h, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED, data, surface.get_stride()
         )
 
-    def _paint_strip(self, cr, width, height, name) -> None:
+    def _paint_strip(self, cr, width, height, name, frame_w, frame_h) -> None:
         alpha = self._alpha()
         self.drawn_alpha = alpha
         horizontal = name in ("top", "bottom")
@@ -334,15 +335,17 @@ class Glow:
             if horizontal
             else cairo.LinearGradient(0, 0, 0, height)
         )
-        stops = 13
+        stops = 25
+        playing = self.status == "playing"
         for i in range(stops):
             t = i / (stops - 1)
-            u = self._perimeter(name, t)
-            mix = 0.5 + 0.5 * math.sin(2 * math.pi * (u * 3 - self.phase))
+            u = perimeter_u(name, t, frame_w, frame_h)
+            mix = edge_mix(u, self.phase * 0.5)
             r = self.accent[0] * mix + self.accent2[0] * (1 - mix)
             g = self.accent[1] * mix + self.accent2[1] * (1 - mix)
             b = self.accent[2] * mix + self.accent2[2] * (1 - mix)
-            strength = 0.45 + 0.55 * self._comet(u) if self.status == "playing" else 1.0
+            # comets ride a steady base glow while playing; paused is even
+            strength = 0.5 + 0.5 * comet_strength(u, self.phase) if playing else 0.8
             along.add_color_stop_rgba(t, r, g, b, strength)
         if name == "top":
             fade = cairo.LinearGradient(0, 0, 0, height)
@@ -352,9 +355,8 @@ class Glow:
             fade = cairo.LinearGradient(0, 0, width, 0)
         else:
             fade = cairo.LinearGradient(width, 0, 0, 0)
-        fade.add_color_stop_rgba(0.0, 1, 1, 1, alpha)
-        fade.add_color_stop_rgba(0.5, 1, 1, 1, alpha * 0.28)
-        fade.add_color_stop_rgba(1.0, 1, 1, 1, 0.0)
+        for offset, a in falloff_stops(alpha):
+            fade.add_color_stop_rgba(offset, 1, 1, 1, a)
         cr.set_source(along)
         cr.mask(fade)
 
