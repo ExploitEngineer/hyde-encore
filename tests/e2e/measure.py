@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from harness import LIB, Harness, write_png
-from stage import LAB, Lab, open_app
+from stage import LAB, Lab, look_value, open_app
 
 from encorelib.look import update_look
 
@@ -60,6 +60,7 @@ def main() -> int:
         "--lab", action="store_true", help="run GUI surfaces on the hidden stage monitor"
     )
     parser.add_argument("--app", default="", help="also measure the Encore window on this page")
+    parser.add_argument("--look", action="append", default=[], help="look key=value")
     args = parser.parse_args()
 
     lab = Lab() if args.lab else contextlib.nullcontext()
@@ -74,7 +75,11 @@ def main() -> int:
         pids = {"daemon": h.start_daemon().pid}
         h.ctl("encoretest", "play")
         h.wait(lambda s: s["status"] == "playing" and s["lyrics"] and s["track"]["art"], 15)
-        update_look(h.run / "hyde" / "encore.look", style=args.style)
+        look = {"style": args.style}
+        for item in args.look:
+            key, _, value = item.partition("=")
+            look[key.replace("-", "_")] = look_value(value)
+        update_look(h.run / "hyde" / "encore.look", **look)
         if args.overlay:
             pids["overlay"] = h._spawn(["bash", str(LIB / "encore.sh"), "overlay"], "ov.log").pid
         if args.glow:
