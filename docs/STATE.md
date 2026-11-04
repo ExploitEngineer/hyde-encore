@@ -56,4 +56,4 @@ Current shape: Encore is an app (DECISIONS #29); the next project is lyric anima
 - Full screen on a second monitor while Home stays on the first (a `--display` for Full screen).
 - Waybar module showing the current lyric line from `encore.sock`.
 
-verified: 7320fc7 2026-11-04
+verified: b0be574 2026-11-04

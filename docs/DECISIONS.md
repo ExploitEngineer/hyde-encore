@@ -146,7 +146,7 @@ Every look writer also keeps the merged look there and every entry point restore
 
 ## 33. 2026-11-04 - Close to tray through a StatusNotifierItem; Quit stops every surface - Active
 Closing the window with desktop lyrics or glow running keeps Encore in the tray (StatusNotifierItem and dbusmenu exported with plain Gio, registered whenever a watcher appears); with neither on, closing quits.
-Quit stops the overlay and glow and clears the full-screen flag; the daemon keeps running for the lock screen.
+Quit stops the overlay and glow, records both as off and clears the full-screen flag (which names the app's pid, so a crashed app never keeps the desktop overlay hidden); the daemon keeps running for the lock screen.
 The app also exposes `close` and `quit` as GTK app actions, which the lab tests drive over D-Bus (Hyprland's Lua `window.close` dispatcher accepted the call without closing the window).
 
 ## 34. 2026-11-04 - Pre-existing fix: rounded clips and shadows were empty - Active
