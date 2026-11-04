@@ -131,3 +131,19 @@ def test_fast_skips_end_on_last_track_with_bounded_threads(harness):
     harness.wait(settled, timeout=15)
     # lyrics and palette work: at most 2 + 1 workers above the idle daemon
     assert peak - baseline <= 3, (baseline, peak)
+
+
+def test_rate_is_followed(playing):
+    playing.set_rate("encoretest", 1.5)
+    state = playing.wait(lambda s: s["rate"] == 1.5)
+    time.sleep(1.0)  # let the player run at 1.5x
+    player_pos = float(playing.ctl("encoretest", "position"))
+    daemon_pos = state["position"] + (time.monotonic() - state["ts"]) * state["rate"]
+    assert abs(daemon_pos - player_pos) < 0.15, (daemon_pos, player_pos)
+
+
+def test_bad_rate_falls_back_to_one(playing):
+    playing.set_rate("encoretest", 1.5)
+    playing.wait(lambda s: s["rate"] == 1.5)
+    playing.set_rate("encoretest", 0.0)
+    assert playing.wait(lambda s: s["rate"] == 1.0)["status"] == "playing"

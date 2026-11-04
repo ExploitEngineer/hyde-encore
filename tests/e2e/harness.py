@@ -184,6 +184,29 @@ class Harness:
         )
         return out.stdout.strip()
 
+    def set_rate(self, name: str, rate: float) -> None:
+        """Set MPRIS Rate the way a player's speed control would (playerctl cannot)."""
+        subprocess.run(
+            [
+                "gdbus",
+                "call",
+                "--session",
+                "--dest",
+                f"org.mpris.MediaPlayer2.{name}",
+                "--object-path",
+                "/org/mpris/MediaPlayer2",
+                "--method",
+                "org.freedesktop.DBus.Properties.Set",
+                "org.mpris.MediaPlayer2.Player",
+                "Rate",
+                f"<{float(rate)}>",
+            ],
+            env=self.env,
+            capture_output=True,
+            check=True,
+            timeout=5,
+        )
+
     def state(self) -> dict | None:
         return read_state(self.socket)
 

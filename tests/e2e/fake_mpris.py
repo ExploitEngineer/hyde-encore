@@ -39,7 +39,7 @@ XML = """
     <property name="PlaybackStatus" type="s" access="read"/>
     <property name="Metadata" type="a{sv}" access="read"/>
     <property name="Position" type="x" access="read"/>
-    <property name="Rate" type="d" access="read"/>
+    <property name="Rate" type="d" access="readwrite"/>
     <property name="Volume" type="d" access="read"/>
     <property name="CanGoNext" type="b" access="read"/>
     <property name="CanGoPrevious" type="b" access="read"/>
@@ -66,10 +66,11 @@ class FakePlayer:
         self.status = "Paused"
         self.base = 0.0
         self.since = time.monotonic()
+        self.rate = 1.0
 
     def position(self) -> float:
         if self.status == "Playing":
-            return self.base + time.monotonic() - self.since
+            return self.base + (time.monotonic() - self.since) * self.rate
         return self.base
 
     def set_position(self, seconds: float) -> None:
@@ -138,10 +139,18 @@ class FakePlayer:
             "PlaybackStatus": GLib.Variant("s", self.status),
             "Metadata": self.metadata(),
             "Position": GLib.Variant("x", int(self.position() * 1e6)),
-            "Rate": GLib.Variant("d", 1.0),
+            "Rate": GLib.Variant("d", self.rate),
             "Volume": GLib.Variant("d", 1.0),
         }
         return values.get(prop, GLib.Variant("b", True))
+
+    def set(self, _c, _s, _p, _i, prop, value) -> bool:
+        if prop != "Rate":
+            return False
+        self.set_position(self.position())  # re-anchor before the speed changes
+        self.rate = value.unpack()
+        self.changed(Rate=GLib.Variant("d", self.rate))
+        return True
 
 
 def main() -> None:
@@ -153,7 +162,7 @@ def main() -> None:
     conn = Gio.bus_get_sync(Gio.BusType.SESSION)
     player = FakePlayer(conn, args.art)
     for iface in node.interfaces:
-        conn.register_object("/org/mpris/MediaPlayer2", iface, player.call, player.get, None)
+        conn.register_object("/org/mpris/MediaPlayer2", iface, player.call, player.get, player.set)
     Gio.bus_own_name_on_connection(
         conn, f"org.mpris.MediaPlayer2.{args.name}", Gio.BusNameOwnerFlags.NONE, None, None
     )

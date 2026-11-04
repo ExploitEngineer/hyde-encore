@@ -33,7 +33,7 @@ if _hyde_lib not in sys.path:
 
 import pyutils.logger as hyde_logger
 from encorelib.cache import LyricsCache
-from encorelib.clock import PlaybackClock
+from encorelib.clock import PlaybackClock, clean_rate
 from encorelib.config import EncoreConfig, load_config
 from encorelib.jobs import LatestJobs
 from encorelib.lookup import lookup_lyrics
@@ -89,8 +89,9 @@ class Encore:
         import gi
 
         gi.require_version("Playerctl", "2.0")
-        from gi.repository import GLib, Playerctl
+        from gi.repository import Gio, GLib, Playerctl
 
+        self.Gio = Gio
         self.GLib = GLib
         self.Playerctl = Playerctl
         self.cfg = cfg
@@ -113,6 +114,10 @@ class Encore:
         self.ticks = 0
         self.recent: list[str] = []
         self.last_cursor = None
+        # MPRIS Rate of the followed player; Playerctl does not expose it
+        self.rate_proxy = None
+        self.rate_instance: str | None = None
+        self.rate_handler = 0
 
         self.manager = Playerctl.PlayerManager()
         self.manager.connect("name-appeared", self.on_name_appeared)
@@ -162,8 +167,51 @@ class Encore:
             if chosen is not None or self.player is not None:
                 logger.info(f"encore follows {name}")
             self.player = chosen
+        self.watch_rate()
         self.refresh_track()
         self.refresh_playback()
+
+    def watch_rate(self) -> None:
+        """Follow the followed player's MPRIS Rate through a D-Bus proxy."""
+        instance = self.player.props.player_instance if self.player is not None else None
+        if instance == self.rate_instance:
+            return
+        if self.rate_proxy is not None and self.rate_handler:
+            self.rate_proxy.disconnect(self.rate_handler)
+        self.rate_proxy, self.rate_handler, self.rate_instance = None, 0, instance
+        if instance is None:
+            return
+        self.Gio.DBusProxy.new_for_bus(
+            self.Gio.BusType.SESSION,
+            self.Gio.DBusProxyFlags.DO_NOT_AUTO_START,
+            None,
+            f"org.mpris.MediaPlayer2.{instance}",
+            "/org/mpris/MediaPlayer2",
+            "org.mpris.MediaPlayer2.Player",
+            None,
+            self.on_rate_proxy,
+            instance,
+        )
+
+    @guarded()
+    def on_rate_proxy(self, _source, result, instance) -> None:
+        proxy = self.Gio.DBusProxy.new_for_bus_finish(result)
+        if instance != self.rate_instance:
+            return  # the followed player changed while the proxy was built
+        self.rate_proxy = proxy
+        self.rate_handler = proxy.connect("g-properties-changed", self.on_player_properties)
+        self.refresh_playback()
+
+    @guarded()
+    def on_player_properties(self, _proxy, changed, _invalidated) -> None:
+        if "Rate" in changed.unpack():
+            self.refresh_playback()
+
+    def player_rate(self) -> float:
+        if self.rate_proxy is None:
+            return 1.0
+        value = self.rate_proxy.get_cached_property("Rate")
+        return clean_rate(value.unpack() if value is not None else None)
 
     @guarded()
     def on_status(self, player, _status) -> None:
@@ -286,7 +334,7 @@ class Encore:
     def refresh_playback(self) -> None:
         playing = self.player is not None and self.status_of(self.player) == "Playing"
         position = self.player_position() if self.player is not None else 0.0
-        self.clock.sync(position, playing)
+        self.clock.sync(position, playing, self.player_rate())
         if playing and not self.tick_id:
             self.tick_id = self.GLib.timeout_add(TICK_MS, self.tick)
         elif not playing and self.tick_id:
