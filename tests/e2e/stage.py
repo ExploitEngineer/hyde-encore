@@ -140,7 +140,7 @@ def open_app(h: Harness, lab: Lab, page: str) -> tuple[tuple[int, int, int, int]
             'hl.window_rule({name = "encore_lab_player", '
             'match = {class = "^org\\\\.hyde\\\\.encore\\\\.lab$"}, '
             f'workspace = "{monitor["activeWorkspace"]["id"]} silent", '
-            'float = true, center = true, size = "960 700", '
+            'float = true, center = true, size = "960 760", '
             'opacity = "1.0 override 1.0 override"})',
         ),
     )

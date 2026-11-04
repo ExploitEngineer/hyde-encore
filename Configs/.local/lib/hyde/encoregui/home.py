@@ -26,8 +26,8 @@ from encorelib.lyricview import live_position, lyric_row
 from encorelib.screen import lookup_reason, pick_music_apps, screen_state
 from encorelib.transport import fmt_time
 
-ART = 236
-ART_EXPANDED = 300
+ART = 256
+ART_EXPANDED = 320
 EXPAND_MS = 220
 PAUSED_ALPHA = 0.85
 SEEK_DEBOUNCE_MS = 150
@@ -195,7 +195,7 @@ class VolumeControl(Gtk.Box):
         self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 0.01)
         self.scale.add_css_class("volume")
         self.scale.set_draw_value(False)
-        self.scale.set_size_request(120, -1)
+        self.scale.set_size_request(140, -1)
         self.scale.set_tooltip_text("Volume (Up and Down)")
         self.scale.connect("change-value", self._on_change)
         self.append(self.icon)
@@ -380,7 +380,7 @@ class HomePage(Gtk.Stack):
             self.expanded = max(self.expand_target, self.expanded - step)
         eased = 1 - (1 - self.expanded) ** 3
         self.cover.set_side(int(ART + (ART_EXPANDED - ART) * eased))
-        self.win.backdrop.queue_draw()
+        self.win.field.set_hover(eased)
         if self.expanded == self.expand_target:
             self.expand_timer = 0
             return False

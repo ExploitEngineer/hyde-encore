@@ -13,73 +13,94 @@ from gi.repository import Gdk, Gio, Gtk
 UI_FONT = "SF Pro Display"
 ADWAITA_SYMBOLIC = "/usr/share/icons/Adwaita/symbolic"
 
-CSS = """
-window.encore-app { background: #18171a; }
-.title { font-family: "SF Pro Display"; font-size: 19px; font-weight: 700; color: #ececf0; }
-.artist { font-family: "SF Pro Display"; font-size: 14px; color: #8e8d94; }
-.art-frame { border-radius: 26px; padding: 7px; background: rgba(255,255,255,0.06);
-             box-shadow: 0 0 0 1px rgba(255,255,255,0.10), 0 18px 48px rgba(0,0,0,0.55); }
-.art-frame picture { border-radius: 20px; }
-button.round { min-width: 42px; min-height: 42px; border-radius: 999px; padding: 0;
-               background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.07);
-               box-shadow: none; color: #d8d8de; }
-button.round:hover { background: rgba(255,255,255,0.13); }
-button.round.big { min-width: 56px; min-height: 56px; }
-button.pill { border-radius: 999px; padding: 6px 16px; min-height: 0;
-              background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.07);
-              box-shadow: none; color: #d8d8de; font-family: "SF Pro Display"; font-size: 13px; }
-button.pill:hover { background: rgba(255,255,255,0.13); }
-button.pill.on { color: #ff6f9c; background: rgba(255,111,156,0.12); }
-.bottombar button.round { min-width: 40px; min-height: 40px; }
-.card { background: rgba(255,255,255,0.035); border-radius: 22px;
-        border: 1px solid rgba(255,255,255,0.08); padding: 26px; }
-.lyric { font-family: "SF Pro Display"; font-size: 21px; font-weight: 700; color: rgba(236,236,240,0.30); }
-.lyric.current { color: #f4f4f7; }
-.lyric.near { color: rgba(236,236,240,0.48); }
-.vsep { background: rgba(255,255,255,0.08); min-width: 1px; }
-popover.menu-like > contents { background: #1f1d20; border-radius: 12px; padding: 6px 0;
-                              border: 1px solid rgba(255,255,255,0.09); }
-.section { font-family: "SF Pro Display"; font-size: 12px; font-weight: 600; color: #6f6d74;
-           margin: 8px 14px 2px 14px; }
-button.item { background: transparent; border: none; box-shadow: none; border-radius: 6px;
-              padding: 3px 10px; margin: 0 5px; min-height: 22px; color: #ececf0;
-              font-family: "SF Pro Display"; font-size: 13px; }
-button.item:hover { background: #2f6ef7; color: white; }
-.mark { min-width: 14px; color: #ececf0; }
-.hsep { background: rgba(255,255,255,0.08); min-height: 1px; margin: 5px 12px; }
-.row-label { font-family: "SF Pro Display"; font-size: 13px; color: #ececf0; }
-.panel { background: #232125; border-radius: 14px; padding: 16px 18px;
-         border: 1px solid rgba(255,255,255,0.09); }
-.panel-title { font-family: "SF Pro Display"; font-size: 13px; font-weight: 700; color: #ececf0; }
-.dim { color: #8e8d94; font-size: 12px; }
-dropdown > button { background: rgba(255,255,255,0.08); border: none; box-shadow: none;
-                    border-radius: 7px; min-height: 26px; padding: 0 8px; color: #ececf0; }
-scale trough { background: rgba(255,255,255,0.14); min-height: 4px; border-radius: 4px; }
-scale highlight { background: #6b7ce8; border-radius: 4px; }
-scale slider { background: #9a9aa2; min-width: 18px; min-height: 18px; border-radius: 9px; }
-switch { background: rgba(255,255,255,0.16); }
-switch:checked { background: #6b7ce8; }
-.time { font-family: "SF Pro Display"; font-size: 11px; color: #8e8d94; font-feature-settings: "tnum"; }
-scale.seek trough, scale.volume trough { min-height: 4px; }
-scale.seek slider, scale.volume slider { min-width: 12px; min-height: 12px; margin: -4px; border-radius: 6px;
-                                         background: #ececf0; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
-scale.seek highlight { background: #ececf0; }
-.dim-icon { color: #8e8d94; }
-menubutton.chip > button { border-radius: 999px; padding: 4px 12px; min-height: 0;
-                           background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
-                           box-shadow: none; color: #b8b7bf; font-family: "SF Pro Display"; font-size: 12px; }
-menubutton.chip > button:hover { background: rgba(255,255,255,0.12); }
-.status { font-family: "SF Pro Display"; font-size: 12px; color: #8e8d94; }
-.idle-title { font-family: "SF Pro Display"; font-size: 30px; font-weight: 800; color: #f4f4f7; }
-.lyric.message { color: rgba(236,236,240,0.55); font-size: 18px; font-weight: 600; }
-.lyric.seekable:hover { color: rgba(236,236,240,0.75); }
-.lyric.seekable.current:hover { color: #f4f4f7; }
-button.round.on { border-color: rgba(255,255,255,0.18); }
-.fullbar button.pill, .fullbar button.round { background: rgba(20,18,24,0.55);
-                                              border: 1px solid rgba(255,255,255,0.12); }
-.fullbar button.pill:hover, .fullbar button.round:hover { background: rgba(40,36,48,0.75); }
-.fullbar .title { font-size: 15px; } .fullbar .artist { font-size: 12px; }
-.fullbar .time { color: rgba(255,255,255,0.75); }
+# tokens (GTK CSS has no custom properties: rendered into the sheet once)
+UI_BASE = "#141317"
+UI_FG = "#ececf0"
+UI_DIM = "#9a98a3"
+UI_MUTED = "#6f6d76"
+GLASS_FILL = "rgba(28,26,34,0.62)"
+GLASS_FILL_HOVER = "rgba(44,41,52,0.72)"
+GLASS_EDGE = "rgba(255,255,255,0.12)"
+HAIRLINE = "rgba(255,255,255,0.08)"
+FONT = '"SF Pro Display", "Inter", sans-serif'
+SERIF = '"Instrument Serif", "Noto Serif", serif'
+
+CSS = f"""
+window.encore-app {{ background: {UI_BASE}; }}
+* {{ font-family: {FONT}; }}
+.title {{ font-size: 24px; font-weight: 800; color: {UI_FG}; letter-spacing: -0.2px; }}
+.artist {{ font-size: 15px; font-weight: 500; color: {UI_DIM}; }}
+button.round {{ min-width: 44px; min-height: 44px; border-radius: 999px; padding: 0;
+               background: {GLASS_FILL}; border: 1px solid {GLASS_EDGE};
+               box-shadow: 0 6px 18px rgba(0,0,0,0.28); color: #dcdbe2;
+               transition: background-color 120ms ease-out, box-shadow 120ms ease-out, border-color 120ms ease-out; }}
+button.round:hover {{ background: {GLASS_FILL_HOVER}; border-color: rgba(255,255,255,0.2); }}
+button.round:active {{ background: rgba(16,14,20,0.8); box-shadow: 0 2px 6px rgba(0,0,0,0.35); }}
+button.round.big {{ min-width: 60px; min-height: 60px; background: {UI_FG}; color: #16141a;
+                   border-color: transparent; box-shadow: 0 10px 28px rgba(0,0,0,0.45); }}
+button.round.big:hover {{ background: #ffffff; }}
+button.round.big:active {{ background: #d6d5dc; }}
+button.round.on {{ border-color: rgba(255,255,255,0.28); }}
+button.pill {{ border-radius: 999px; padding: 7px 16px; min-height: 0;
+              background: {GLASS_FILL}; border: 1px solid {GLASS_EDGE};
+              box-shadow: 0 6px 18px rgba(0,0,0,0.28); color: #dcdbe2; font-size: 13px; font-weight: 600;
+              transition: background-color 120ms ease-out, border-color 120ms ease-out; }}
+button.pill:hover {{ background: {GLASS_FILL_HOVER}; border-color: rgba(255,255,255,0.2); }}
+button.pill:active {{ background: rgba(16,14,20,0.8); }}
+button.pill.on {{ color: #ff6f9c; background: rgba(255,111,156,0.12); }}
+.bottombar button.round {{ min-width: 42px; min-height: 42px; }}
+.card {{ background: rgba(20,18,24,0.42); border-radius: 24px;
+        border: 1px solid {HAIRLINE}; padding: 26px; box-shadow: 0 24px 60px rgba(0,0,0,0.35); }}
+.lyric {{ font-size: 21px; font-weight: 700; color: rgba(236,236,240,0.30); }}
+.lyric.current {{ color: #f4f4f7; }}
+.lyric.near {{ color: rgba(236,236,240,0.48); }}
+.vsep {{ background: {HAIRLINE}; min-width: 1px; }}
+popover.menu-like > contents {{ background: rgba(26,24,31,0.96); border-radius: 14px; padding: 6px 0;
+                              border: 1px solid {GLASS_EDGE}; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }}
+.section {{ font-size: 11px; font-weight: 600; color: {UI_MUTED}; letter-spacing: 0.9px;
+           margin: 10px 14px 2px 14px; }}
+button.item {{ background: transparent; border: none; box-shadow: none; border-radius: 7px;
+              padding: 4px 10px; margin: 0 6px; min-height: 22px; color: {UI_FG}; font-size: 13px;
+              transition: background-color 90ms ease-out; }}
+button.item:hover {{ background: #2f6ef7; color: white; }}
+.mark {{ min-width: 14px; color: {UI_FG}; }}
+.hsep {{ background: {HAIRLINE}; min-height: 1px; margin: 6px 12px; }}
+.row-label {{ font-size: 13px; color: {UI_FG}; }}
+.panel {{ background: rgba(28,26,34,0.96); border-radius: 16px; padding: 16px 18px;
+         border: 1px solid {GLASS_EDGE}; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }}
+.panel-title {{ font-size: 11px; font-weight: 600; color: {UI_MUTED}; letter-spacing: 0.9px; }}
+.dim {{ color: {UI_DIM}; font-size: 12px; }}
+dropdown > button {{ background: rgba(255,255,255,0.08); border: none; box-shadow: none;
+                    border-radius: 8px; min-height: 26px; padding: 0 8px; color: {UI_FG}; }}
+scale trough {{ background: rgba(255,255,255,0.14); min-height: 4px; border-radius: 4px; }}
+scale highlight {{ background: #6b7ce8; border-radius: 4px; }}
+scale slider {{ background: #9a9aa2; min-width: 18px; min-height: 18px; border-radius: 9px; }}
+switch {{ background: rgba(255,255,255,0.16); }}
+switch:checked {{ background: #6b7ce8; }}
+.time {{ font-size: 12px; color: {UI_DIM}; font-feature-settings: "tnum"; }}
+scale.seek trough {{ min-height: 6px; border-radius: 3px; background: rgba(255,255,255,0.16); }}
+scale.seek highlight {{ background: {UI_FG}; border-radius: 3px; }}
+scale.seek slider {{ min-width: 14px; min-height: 14px; margin: -4px; border-radius: 7px;
+                    background: {UI_FG}; box-shadow: 0 0 0 4px rgba(255,255,255,0.10), 0 2px 8px rgba(0,0,0,0.5);
+                    transition: box-shadow 120ms ease-out; }}
+scale.seek slider:hover {{ box-shadow: 0 0 0 7px rgba(255,255,255,0.16), 0 2px 8px rgba(0,0,0,0.5); }}
+scale.volume trough {{ min-height: 4px; }}
+scale.volume slider {{ min-width: 12px; min-height: 12px; margin: -4px; border-radius: 6px;
+                      background: {UI_FG}; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }}
+.dim-icon {{ color: {UI_DIM}; }}
+menubutton.chip > button {{ border-radius: 999px; padding: 4px 12px; min-height: 0;
+                           background: rgba(255,255,255,0.05); border: 1px solid {HAIRLINE};
+                           box-shadow: none; color: #b8b7bf; font-size: 12px;
+                           transition: background-color 120ms ease-out; }}
+menubutton.chip > button:hover {{ background: rgba(255,255,255,0.11); }}
+.status {{ font-size: 12px; color: {UI_DIM}; }}
+.idle-title {{ font-family: {SERIF}; font-style: italic; font-size: 44px; font-weight: 400;
+              color: #f4f4f7; letter-spacing: -0.3px; }}
+.lyric.message {{ color: rgba(236,236,240,0.55); font-size: 18px; font-weight: 600; }}
+.lyric.seekable:hover {{ color: rgba(236,236,240,0.75); }}
+.lyric.seekable.current:hover {{ color: #f4f4f7; }}
+.fullbar .title {{ font-size: 15px; }} .fullbar .artist {{ font-size: 12px; }}
+.fullbar .time {{ color: rgba(255,255,255,0.75); }}
 """
 
 
@@ -134,8 +155,9 @@ def accent_rules(colors) -> str:
     """The few rules that follow the album: active pill, sliders, switches, menu hover."""
     a, h, on = colors.accent, colors.highlight, colors.on_highlight
     return (
-        f"button.pill.on {{ color: #{a}; background: alpha(#{a}, 0.14); }}\n"
-        f"button.round.on {{ color: #{a}; background: alpha(#{a}, 0.16); }}\n"
+        f"button.pill.on {{ color: #{a}; background: alpha(#{a}, 0.14); border-color: alpha(#{a}, 0.5); }}\n"
+        f"button.round.on {{ color: #{a}; background: alpha(#{a}, 0.16); border-color: alpha(#{a}, 0.55); }}\n"
+        f"scale.seek slider {{ box-shadow: 0 0 0 4px alpha(#{a}, 0.22), 0 0 18px alpha(#{a}, 0.55), 0 2px 8px rgba(0,0,0,0.5); }}\n"
         f"scale highlight {{ background: #{a}; }}\n"
         f"switch:checked {{ background: #{h}; }}\n"
         f"button.item:hover {{ background: #{h}; color: #{on}; }}\n"

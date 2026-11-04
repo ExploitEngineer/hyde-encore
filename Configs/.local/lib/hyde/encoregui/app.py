@@ -17,16 +17,15 @@ import threading
 import time
 from pathlib import Path
 
-import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 
+from encoregui.field import AlbumField
 from encoregui.fullscreen import FullPage
-from encoregui.home import HomePage, LyricsPage
-from encoregui.idle import IdleField
+from encoregui.home import HomePage, LyricsPage, cover_path
 from encoregui.popovers import build_look_menu, build_settings_popover
 from encoregui.tray import Tray
 from encoregui.ui import accent_rules, hex_rgb, icon_button, icon_image, install_css
@@ -34,7 +33,7 @@ from encorelib.colors import scheme as color_scheme
 from encorelib.config import load_config
 from encorelib.lifecycle import close_action
 from encorelib.lockscreen import ENCORE_LAYOUT, read_layout
-from encorelib.look import state_look_path, update_look
+from encorelib.look import read_look, state_look_path, update_look
 from encorelib.palette import wallpaper_palette
 from encorelib.protocol import read_state
 from encorelib.screen import screen_state
@@ -63,7 +62,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.journal_path = f"{runtime_dir}/encore.lookups"
         self.cfg = load_config()
         self.add_css_class("encore-app")
-        self.set_default_size(960, 700)
+        self.set_default_size(960, 760)
         self.state: dict = {}
         self.palette: dict | None = None
         self.colors = color_scheme({}, wallpaper_palette())
@@ -83,15 +82,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
 
         overlay = Gtk.Overlay()
         self.set_child(overlay)
-        self.background = Gtk.Stack()
-        self.background.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        self.background.set_transition_duration(600)
-        self.backdrop = Gtk.DrawingArea()
-        self.backdrop.set_draw_func(self._draw_backdrop)
-        self.idle = IdleField()
-        self.background.add_named(self.backdrop, "album")
-        self.background.add_named(self.idle, "idle")
-        overlay.set_child(self.background)
+        self.field = AlbumField()  # the album's light under every page
+        overlay.set_child(self.field)
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         overlay.add_overlay(root)
         self.header = self._build_header()
@@ -402,10 +394,11 @@ class EncoreWindow(Gtk.ApplicationWindow):
             self.colors = color_scheme(palette, wallpaper_palette())
             self.accent = hex_rgb(self.colors.accent)
             self.accent_css.load_from_string(accent_rules(self.colors))
-            self.backdrop.queue_draw()
-            self.idle.set_colors(self.colors)
+            self.field.set_colors(self.colors)
         idle = screen_state(state, time.monotonic()) == "idle"
-        self.background.set_visible_child_name("idle" if idle else "album")
+        self.field.set_cover("" if idle else cover_path(state))
+        self.field.set_playing(state.get("status") == "playing")
+        self.field.set_motion(read_look(self.look_path).get("motion", True))
         self.chip_label.set_label(player_label(state.get("player") or ""))
         self.chip.set_sensitive(bool(state.get("players")))
         for page in (self.home, self.lyrics, self.full):
@@ -465,27 +458,6 @@ class EncoreWindow(Gtk.ApplicationWindow):
             text = f"{button.base_tooltip}: {'on' if on else 'off'}"
             if button.get_tooltip_text() != text:
                 button.set_tooltip_text(text)
-
-    def _draw_backdrop(self, _area, cr, width, height) -> None:
-        cr.set_source_rgb(0.094, 0.090, 0.102)
-        cr.paint()
-        r, g, b = self.accent
-        eased = 1 - (1 - self.home.expanded) ** 3
-        # album-tinted bloom behind the cover, stronger when it grows
-        cx, cy = width / 2, height * 0.36
-        glow = cairo.RadialGradient(cx, cy, 20, cx, cy, max(width, height) * (0.46 + 0.22 * eased))
-        # the cover hides the center, so the visible ring carries the color
-        glow.add_color_stop_rgba(0, r, g, b, 0.42 + 0.18 * eased)
-        glow.add_color_stop_rgba(0.5, r, g, b, 0.17 + 0.10 * eased)
-        glow.add_color_stop_rgba(1, r, g, b, 0.0)
-        cr.set_source(glow)
-        cr.paint()
-        if eased > 0:
-            wash = cairo.LinearGradient(0, 0, 0, height)
-            wash.add_color_stop_rgba(0, r, g, b, 0.10 * eased)
-            wash.add_color_stop_rgba(1, r * 0.4, g * 0.4, b * 0.4, 0.22 * eased)
-            cr.set_source(wash)
-            cr.paint()
 
 
 def _page_from(arguments: list[str]) -> str | None:

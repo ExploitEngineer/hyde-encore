@@ -21,8 +21,8 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GLib, Gtk
 
 from encoregui.cover import CoverBackdrop, CoverView
+from encoregui.field import AlbumField
 from encoregui.home import SeekBar, Transport, VolumeControl, cover_path, meta_labels, set_meta
-from encoregui.idle import IdleField
 from encoregui.lyrics import LyricsEngine
 from encoregui.popovers import build_look_menu
 from encoregui.ui import icon_button
@@ -55,7 +55,7 @@ class FullPage(Gtk.Overlay):
         self.canvas_holder.set_child(Gtk.Box())
         self.show.add_overlay(self.canvas_holder)
         self.idle = Gtk.Overlay()
-        self.idle_field = IdleField()
+        self.idle_field = AlbumField()
         self.idle.set_child(self.idle_field)
         waiting = Gtk.Label(label="Waiting for music")
         waiting.add_css_class("idle-title")

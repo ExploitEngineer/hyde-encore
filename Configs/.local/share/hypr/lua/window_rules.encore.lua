@@ -8,7 +8,7 @@ hl.window_rule(
     },
     float = true,
     center = true,
-    size = "960 700",
+    size = "960 760",
     opacity = "1.0 override 1.0 override"
   }
 )
