@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from conftest import FIXTURES
+from paths import FIXTURES
 
 from encorelib.config import EncoreConfig, load_config
 

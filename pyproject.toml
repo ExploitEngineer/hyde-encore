@@ -2,6 +2,7 @@
 # Configs/.local/lib/hyde; encore adds no runtime Python dependencies.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["e2e: runs the daemon against fake players on a private bus (deselect with -m \"not e2e\")"]
 
 [tool.ruff]
 line-length = 100

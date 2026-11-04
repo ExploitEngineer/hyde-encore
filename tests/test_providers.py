@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from conftest import FIXTURES
+from paths import FIXTURES
 
 from encorelib.config import EncoreConfig
 from encorelib.model import Line, Lyrics, Word
