@@ -5,7 +5,7 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 
 ## Shipped (main, PRs #1-#8)
 - Engine (`encorelib/`): LRC and enhanced LRC parser (syllable tags merge into words), CJK-aware word tokens, word-timing estimator calibrated on real word sync, gap-aware cursor, playback clock that keeps the rate across resyncs, config loader, providers (local `.lrc` always wins and is never cached, LRCLIB with junk-upload filter and up to three search variants for feat. credits, release qualifiers and browser "Artist - Title" videos, Spicy Lyrics syllable sync with a user key), versioned LRU lyrics cache (2000 tracks, errors never cached), album palette via `wallbash.sh`, JSON-lines protocol v1 (`lyrics.lines`, `line.text`, `gap` whenever no line is live).
-- Daemon (`encore daemon`): follows the most recently started MPRIS player or `[encore] players`, worker-thread fetches guarded against stale results, publishes `encore.sock` plus hyprlock line, track and cover files.
+- Daemon (`encore daemon`): follows the most recently started MPRIS player or `[encore] players` (a same-song switch updates the player), follows the player's MPRIS `Rate`, bounded latest-wins lyric and palette workers with stale results discarded, publishes `encore.sock` plus hyprlock line, track and cover files.
 - Overlay (`encore toggle`, `encore style`): GTK4 layer-shell, click-through, styles `line` (karaoke strip), `stack` (rolling column, ghost trails, mixed fonts), `constellation` (word chain, hairlines, cluster fade), `visual` (full-bleed art layer, column with glyphs and a Highlight marker).
 - Live look (`encore look`, runtime `encore.look`): style, font, size, Lyric Text / Highlight / Secondary colors, next line, motion.
 - Glow (`encore glow`): one full-screen click-through window, 1/4-res texture scaled on the GPU, two comets circling, cava beat envelope or breathe fallback, 12.5 fps; look keys for gradient (1 or 2 colors), animation (music, breathe, static), thickness, intensity, override colors.
@@ -14,15 +14,15 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 - The overlay, glow and player start the daemon on demand when it is not answering (DECISIONS #20).
 - hyprlock `Encore.conf`: art, title, artist, word-highlighted line.
 - Upstream fragments: schema and config toml, `variables.encore.lua` (hc.start), `key_binds.encore.lua` (SUPER+ALT+{L,K,M,E}), `window_rules.encore.lua` (player floats).
-- 263 unit tests, ruff clean; `tests/e2e/fake_mpris.py` scriptable MPRIS player; `tests/tools/calibrate_timing.py` scores the estimator against cached word sync.
+- 283 tests, ruff clean, including 16 end-to-end tests of the daemon on a private bus (`tests/e2e/harness.py`, marker `e2e`); `tests/e2e/fake_mpris.py` scriptable MPRIS player with a writable `Rate`; `tests/tools/calibrate_timing.py` scores the estimator against cached word sync.
 
 ## Measured (this laptop, 2026-11-03/04)
-- Daemon: playing ~0.4% of a core, ~40 MB RSS; paused 0 ticks over 10 s.
+- Daemon (isolated harness, `tests/e2e/measure.py`, 10 s phases): playing 0.60%, paused 0 ticks, playing with no lyric line 0.40% of one core.
 - Overlay animating: line ~6%, stack 9%, visual 11% of a core; paused and hidden 0.
 - Glow: 2.5% of a core at 20 fps, measured before the drop to 12.5 fps.
 - Estimated word timing: mean word-start error 0.21 s against 11 real word-synced songs (was 0.43 s); see DECISIONS #19.
 - LRCLIB: feat. titles, browser video titles and empty-artist lookups that found nothing now return synced lyrics (live check 2026-11-04).
-- Caveat: numbers came from `measure_overlay.sh` on the live runtime dir or a scratchpad harness that no longer exists; re-measure on the isolated harness (layer 2) before quoting them.
+- Caveat: the overlay and glow numbers came from the retired `measure_overlay.sh` or a scratchpad harness; re-measure with `measure.py --overlay` / `--glow` (they draw on the real screen, owner's OK first) before quoting them.
 
 ## Verified with the owner (2026-11-04)
 - Real Spotify: follows Spotify over a stopped Brave tab; Spicy Lyrics word sync on "LEGACY (slowed down)" lights word by word in time.
@@ -36,13 +36,7 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 ## Broken or placebo
 - Glow popover Display picker only posts a notification; nothing moves.
 - Player bottom bar: the display button cycles the style and the lock button previews hyprlock; neither matches the reference.
-- `tests/e2e/measure_overlay.sh` runs the installed copy on the live runtime dir, so it can collide with a running session.
 - Polish, parity, setup and player branches shipped without an independent review.
-
-## Known gaps (daemon)
-- The daemon never reads MPRIS `Rate`, so the clock stays at 1.0 (the clock side is ready).
-- Fast skipping spawns one fetch and one palette thread per track (results are discarded safely).
-- No automated test of the GLib daemon class.
 
 ## Not built
 - Multi-monitor: overlay picks one output (`overlay.monitor`), glow takes the compositor's choice.
@@ -50,8 +44,8 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 - Glow autostart; only the overlay has an `enable` key.
 
 ## Next
-- Layer 2: bounded fetch pool, real playback rate, isolated harness in `tests/e2e/` (private `dbus-run-session` bus plus a short private runtime dir under `/run/user/$UID`, since AF_UNIX paths cap at 108 bytes), pytest E2E of the daemon against `fake_mpris.py`.
-- Layers 3-7 as listed above.
+- Layer 3: overlay, one style at a time (line, stack, constellation, visual): pixel pass against `.reference/` frames, motion timing from the official videos, perf on `measure.py --overlay`.
+- Layers 4-7 as listed above.
 
 ## Known facts
 - HyDE bugs found (candidate small PRs): `hyprlock.sh find_filepath` uses `find -type f` without `-L`, so symlinked layouts fail to load and `Encore.conf` is installed as a copy; `hyprlock.sh fn_mpris` reads the first listed player, not the playing one.
@@ -69,4 +63,4 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 - `hyde-shell encore lrc` saves the current lyrics as a local `.lrc` for offline use and hand-tuning.
 - Waybar module showing the current lyric line from `encore.sock`.
 
-verified: d470879 2026-11-04
+verified: 7ff9a3c 2026-11-04
