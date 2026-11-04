@@ -137,9 +137,14 @@ def test_rate_is_followed(playing):
     playing.set_rate("encoretest", 1.5)
     state = playing.wait(lambda s: s["rate"] == 1.5)
     time.sleep(1.0)  # let the player run at 1.5x
+    before = time.monotonic()
     player_pos = float(playing.ctl("encoretest", "position"))
-    daemon_pos = state["position"] + (time.monotonic() - state["ts"]) * state["rate"]
-    assert abs(daemon_pos - player_pos) < 0.15, (daemon_pos, player_pos)
+    after = time.monotonic()
+    # the player answered somewhere inside the playerctl call: compare at its middle
+    # and allow for the half-call uncertainty at 1.5x
+    daemon_pos = state["position"] + ((before + after) / 2 - state["ts"]) * state["rate"]
+    slack = 0.15 + (after - before) / 2 * state["rate"]
+    assert abs(daemon_pos - player_pos) < slack, (daemon_pos, player_pos, slack)
 
 
 def test_bad_rate_falls_back_to_one(playing):

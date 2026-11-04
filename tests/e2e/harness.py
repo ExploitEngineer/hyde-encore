@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,8 @@ from encorelib.protocol import read_state
 
 STOP_TIMEOUT = 3.0
 POLL_SECONDS = 0.05
+# children die with the test process even if it is SIGKILLed
+_PDEATHSIG = ["setpriv", "--pdeathsig", "TERM", "--"] if shutil.which("setpriv") else []
 
 
 def missing_requirement() -> str | None:
@@ -69,10 +72,12 @@ class Harness:
         self.children: list[subprocess.Popen] = []
         self.run: Path | None = None
         self.env: dict[str, str] = {}
+        self._handlers: dict[int, object] = {}
 
     # lifecycle ---------------------------------------------------------------
 
     def __enter__(self) -> Self:
+        self._trap_signals()
         try:
             self._setup()
         except BaseException:
@@ -82,7 +87,7 @@ class Harness:
 
     def _setup(self) -> None:
         self.bus = subprocess.Popen(
-            ["dbus-daemon", "--session", "--nofork", "--print-address=1"],
+            [*_PDEATHSIG, "dbus-daemon", "--session", "--nofork", "--print-address=1"],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
@@ -116,12 +121,31 @@ class Harness:
             self.bus.stdout.close()
         if self.run is not None:
             shutil.rmtree(self.run, ignore_errors=True)
+        for signum, handler in self._handlers.items():
+            signal.signal(signum, handler)
+        self._handlers.clear()
+
+    def _trap_signals(self) -> None:
+        """SIGTERM/SIGHUP (CI timeout, closed terminal) unwind the with block, so teardown runs."""
+        import threading
+
+        if threading.current_thread() is not threading.main_thread():
+            return
+
+        def unwind(signum, _frame):
+            raise SystemExit(128 + signum)
+
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            if signal.getsignal(signum) == signal.SIG_DFL:
+                self._handlers[signum] = signal.signal(signum, unwind)
 
     # processes ---------------------------------------------------------------
 
     def _spawn(self, command: list[str], log: str) -> subprocess.Popen:
         with open(self.tmp / "logs" / log, "ab") as out:
-            process = subprocess.Popen(command, env=self.env, stdout=out, stderr=subprocess.STDOUT)
+            process = subprocess.Popen(
+                [*_PDEATHSIG, *command], env=self.env, stdout=out, stderr=subprocess.STDOUT
+            )
         self.children.append(process)
         return process
 

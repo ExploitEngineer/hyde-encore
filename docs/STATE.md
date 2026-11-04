@@ -14,7 +14,7 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 - The overlay, glow and player start the daemon on demand when it is not answering (DECISIONS #20).
 - hyprlock `Encore.conf`: art, title, artist, word-highlighted line.
 - Upstream fragments: schema and config toml, `variables.encore.lua` (hc.start), `key_binds.encore.lua` (SUPER+ALT+{L,K,M,E}), `window_rules.encore.lua` (player floats).
-- 283 tests, ruff clean, including 16 end-to-end tests of the daemon on a private bus (`tests/e2e/harness.py`, marker `e2e`); `tests/e2e/fake_mpris.py` scriptable MPRIS player with a writable `Rate`; `tests/tools/calibrate_timing.py` scores the estimator against cached word sync.
+- 284 tests, ruff clean, including 17 end-to-end tests of the daemon on a private bus (`tests/e2e/harness.py`, marker `e2e`); `tests/e2e/fake_mpris.py` scriptable MPRIS player with a writable `Rate`; `tests/tools/calibrate_timing.py` scores the estimator against cached word sync.
 
 ## Measured (this laptop, 2026-11-03/04)
 - Daemon (isolated harness, `tests/e2e/measure.py`, 10 s phases): playing 0.60%, paused 0 ticks, playing with no lyric line 0.40% of one core.
