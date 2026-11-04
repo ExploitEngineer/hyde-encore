@@ -25,15 +25,16 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 
 from encoregui.field import AlbumField
 from encoregui.fullscreen import FullPage
-from encoregui.home import HomePage, LyricsPage, cover_path
+from encoregui.home import ART, HomePage, LyricsPage, cover_path
 from encoregui.popovers import build_look_menu, build_settings_popover
 from encoregui.tray import Tray
-from encoregui.ui import accent_rules, hex_rgb, icon_button, icon_image, install_css
+from encoregui.ui import accent_rules, hex_rgb, icon_button, icon_image, install_css, trace
 from encorelib.colors import scheme as color_scheme
 from encorelib.config import load_config
 from encorelib.lifecycle import close_action
 from encorelib.lockscreen import ENCORE_LAYOUT, read_layout
 from encorelib.look import read_look, state_look_path, update_look
+from encorelib.motion import ease_out, lerp
 from encorelib.palette import wallpaper_palette
 from encorelib.protocol import read_state
 from encorelib.screen import screen_state
@@ -44,6 +45,11 @@ from encorelib.transport import key_action, step_volume
 APP_ID = os.environ.get("ENCORE_APP_ID", "org.hyde.encore")
 ENCORE_PY = str(Path(__file__).resolve().parent.parent / "encore.py")
 POLL_MS = 400
+PAGE_MS = 280  # Home <-> Lyrics
+FULL_ENTER_MS = 220  # the Home cover grows while the compositor goes full screen
+FULL_LEAVE_MS = 240
+FULL_COVER = 400  # the Home cover grows to this on the way into full screen
+TIMELINE_MS = 33
 PAGES = ("home", "lyrics", "full")
 POPOVERS = ("look", "settings")  # --open names that mean Home with that popover up
 RECONNECT_AFTER = 1.0  # seconds without an answer before saying so
@@ -79,6 +85,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.toggles: dict[str, Gtk.Button] = {}
         self.tray = Tray()
         self.held = False  # the app stays alive while the window hides in the tray
+        self.cover_timer = 0
 
         overlay = Gtk.Overlay()
         self.set_child(overlay)
@@ -90,7 +97,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         root.append(self.header)
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        self.stack.set_transition_duration(220)
+        self.stack.set_transition_duration(PAGE_MS)
         self.stack.set_vexpand(True)
         root.append(self.stack)
         self.home = HomePage(self)
@@ -112,11 +119,22 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.add_controller(key)
         self._poll()
         GLib.timeout_add(POLL_MS, self._poll)
+        # once Home has painted: warm the GPU pipelines full screen will need
+        GLib.timeout_add(700, lambda: (self.full.backdrop.warm_up(self.get_native()), False)[1])
+        if os.environ.get("ENCORE_TRACE"):  # timing runs: every paint leaves a breadcrumb
+
+            def hook(w):
+                clock = w.get_frame_clock()
+                clock.connect("before-paint", lambda *_: trace("paint-begin"))
+                clock.connect("after-paint", lambda *_: trace("paint"))
+
+            self.connect("realize", hook)
         GLib.idle_add(lambda: (self.set_focus(None), False)[1])  # no focus ring at open
 
     # pages ------------------------------------------------------------------
 
     def show_page(self, name: str) -> None:
+        trace(f"show_page {name} from {self.page}")
         if name in POPOVERS:
             popover = self.look_menu if name == "look" else self.settings
             self.show_page("home")
@@ -128,18 +146,62 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.page = name
         if name == "full":
             self.fullscreen()
-            # the engine needs the output it lands on: enter once the surface is there
-            GLib.idle_add(lambda: (self.full.enter(), False)[1])
-        elif leaving_full:
+            # the entry moment, without a crossfade (two full-HD offscreens per frame
+            # are slow here): the Home cover grows, the page cuts, and the backdrop
+            # carries the same cover on to the whole screen, then the lyrics arrive
+            self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
+            self._cover_timeline(ART, FULL_COVER, FULL_ENTER_MS, self._hero_into_full)
+            self.page = name
+            for chrome in (self.header, self.toolbar):
+                chrome.set_visible(False)
+            return
+        if leaving_full:
             self.full.leave()
             self.unfullscreen()
+            self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
+            self._cover_timeline(FULL_COVER, ART, FULL_LEAVE_MS, None)
+        else:
+            self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+            self.stack.set_transition_duration(PAGE_MS)
         self.stack.set_visible_child_name(name)
         for chrome in (self.header, self.toolbar):  # full screen is the page alone
             chrome.set_visible(name != "full")
         if name == "lyrics":
             GLib.timeout_add(260, lambda: (self.lyrics.scroll_to_current(True), False)[1])
 
+    def _hero_into_full(self) -> None:
+        """Cut to the full page and let its backdrop grow the cover from where Home had it."""
+        ok, bounds = self.home.cover.compute_bounds(self.stack)
+        side = FULL_COVER
+        if ok and self.page == "full" and self.stack.get_visible_child() is self.home:
+            x = bounds.get_x() + (bounds.get_width() - side) / 2
+            y = bounds.get_y() + (bounds.get_height() - side) / 2
+        else:
+            x, y = (self.stack.get_width() - side) / 2, (self.stack.get_height() - side) / 2
+        self.stack.set_visible_child_name("full")
+        self.full.backdrop.enter_from(x, y, side, side, done=self.full.enter)
+
+    def _cover_timeline(self, start: int, end: int, ms: int, done) -> None:
+        """Grow or shrink the Home cover over `ms`, then call `done`."""
+        if self.cover_timer:
+            GLib.source_remove(self.cover_timer)
+        began = time.monotonic()
+
+        def step() -> bool:
+            t = (time.monotonic() - began) * 1000 / ms
+            self.home.cover.set_side(int(lerp(start, end, ease_out(t))))
+            if t >= 1.0:
+                self.cover_timer = 0
+                trace("cover timeline done")
+                if done is not None:
+                    done()
+                return False
+            return True
+
+        self.cover_timer = GLib.timeout_add(TIMELINE_MS, step)
+
     def _on_fullscreened(self, *_) -> None:
+        trace(f"fullscreened {self.is_fullscreen()}")
         # the compositor took full screen away (a keybind, another window): never trap
         if not self.is_fullscreen() and self.page == "full":
             self.show_page("home")

@@ -29,6 +29,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gio, GLib, Gtk, Pango, PangoCairo
 
 from encoregui.scene import Image, Scene
+from encoregui.ui import trace
 from encorelib.bytecache import ByteLRU
 from encorelib.colors import resolve
 from encorelib.colors import scheme as color_scheme
@@ -631,6 +632,7 @@ class LyricsEngine:
         key = (view.line_key, self.size, self._accent(), rest)
         raster = self.rasters.get(key)
         if raster is None:
+            trace(f"line raster {len(view.text)} chars")
             raster = LineRaster(
                 view.text,
                 [w for w, _ in view.words],

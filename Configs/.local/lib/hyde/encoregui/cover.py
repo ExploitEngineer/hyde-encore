@@ -20,21 +20,41 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk
 
 from encoregui.scene import Image, Scene, rounded
+from encoregui.ui import trace
 from encorelib.coverfit import fit_cover
+from encorelib.motion import ease_out, lerp
 
 CROSSFADE_SECONDS = 0.3
 
 
+_TEXTURES: dict[str, Gdk.Texture] = {}  # one decoded (and GPU-uploaded) texture per cover
+_KEEP = 4
+
+
 def load_texture(path: str, done) -> None:
     """Decode an image file on a worker thread; `done(path, texture | None)` runs on
-    the main loop."""
+    the main loop. Every widget showing the same cover shares one texture, so the
+    GPU upload happens once (the full-screen page's first frame reuses Home's)."""
+    cached = _TEXTURES.get(path)
+    if cached is not None:
+        GLib.idle_add(lambda: (done(path, cached), False)[1])
+        return
 
     def work():
         try:
             texture = Gdk.Texture.new_from_filename(path)
         except GLib.Error:
             texture = None
-        GLib.idle_add(lambda: (done(path, texture), False)[1])
+
+        def deliver() -> bool:
+            if texture is not None:
+                _TEXTURES[path] = texture
+                while len(_TEXTURES) > _KEEP:
+                    _TEXTURES.pop(next(iter(_TEXTURES)))
+            done(path, texture)
+            return False
+
+        GLib.idle_add(deliver)
 
     threading.Thread(target=work, name="encore-cover", daemon=True).start()
 
@@ -162,6 +182,8 @@ class CoverBackdrop(Gtk.Widget):
     FADE_SECONDS = 0.4
     FRAME_RADIUS = 18
     BLUR = 60
+    HERO_MS = 300  # the cover grows from where it was in the window to the whole screen
+    HERO_RADIUS = 24
 
     def __init__(self):
         super().__init__()
@@ -174,6 +196,9 @@ class CoverBackdrop(Gtk.Widget):
         self.fade_from = 0.0
         self.tick_id = 0
         self.blurred: tuple[tuple, Gdk.Texture] | None = None  # ((texture, w, h), blurred)
+        self.hero: tuple[float, float, float, float] | None = None
+        self.hero_started = 0.0
+        self.hero_timer = 0
         self.connect("unmap", lambda *_: self._stop_fade())
 
     def set_mode(self, mode: str) -> None:
@@ -190,10 +215,101 @@ class CoverBackdrop(Gtk.Widget):
             return
         load_texture(path, self._loaded)
 
+    def warm_up(self, native: Gtk.Native | None) -> None:
+        """Render every node type full screen uses once on a tiny canvas, so the
+        first real full-screen frame does not pay for the renderer's lazy setup
+        (measured at 270-790 ms, once per session)."""
+        renderer = native.get_renderer() if native is not None else None
+        if renderer is None:
+            return
+        trace("warm-up render")
+        size = 96
+        data = GLib.Bytes.new(bytes([40, 30, 50, 255]) * (size * size))
+        tiny = Gdk.MemoryTexture.new(
+            size, size, Gdk.MemoryFormat.B8G8R8A8_PREMULTIPLIED, data, size * 4
+        )
+        img = Image(tiny, size, size)
+        snapshot = Gtk.Snapshot()
+        sc = Scene(snapshot)
+        snapshot.push_blur(self.BLUR / 4)
+        sc.cover(img, 0, 0, size, size)
+        snapshot.pop()
+        with sc.rounded_clip(8, 8, 48, 48, 12):
+            sc.cover(img, 8, 8, 48, 48)
+        sc.shadow(8, 8, 48, 48, 12, 0.5, dy=4, blur=12)
+        snapshot.push_opacity(0.5)
+        sc.image(img, 4, 4, 0.9)
+        snapshot.pop()
+        snapshot.push_repeat(
+            Graphene.Rect().init(0, 0, size, size), Graphene.Rect().init(0, 0, 16, 16)
+        )
+        sc.cover(img, 0, 0, 16, 16)
+        snapshot.pop()
+        edge = Gdk.RGBA()
+        edge.red = edge.green = edge.blue = edge.alpha = 1.0
+        snapshot.append_border(
+            rounded(1, 1, size - 2, size - 2, 10), [1.0, 0.0, 0.0, 0.0], [edge] * 4
+        )
+        stops = []
+        for offset, alpha in ((0.0, 0.5), (1.0, 0.0)):
+            stop = Gsk.ColorStop()
+            stop.offset = offset
+            color = Gdk.RGBA()
+            color.alpha = alpha
+            stop.color = color
+            stops.append(stop)
+        snapshot.append_linear_gradient(
+            Graphene.Rect().init(0, 0, size, 40),
+            Graphene.Point().init(0, 0),
+            Graphene.Point().init(0, 40),
+            stops,
+        )
+        snapshot.append_radial_gradient(
+            Graphene.Rect().init(0, 0, size, size),
+            Graphene.Point().init(48, 48),
+            40.0,
+            40.0,
+            0.0,
+            1.0,
+            stops,
+        )
+        node = snapshot.to_node()
+        if node is not None:
+            renderer.render_texture(node, Graphene.Rect().init(0, 0, size, size))
+
+    def enter_from(self, x: float, y: float, w: float, h: float, done=None) -> None:
+        """Grow the cover from a rect in our coordinates to its full place, then call done."""
+        self.hero = (x, y, w, h)
+        self.hero_started = 0.0  # the clock starts at the first frame actually painted
+        if self.hero_timer:
+            GLib.source_remove(self.hero_timer)
+
+        def tick() -> bool:
+            self.queue_draw()
+            if self.hero_started and time.monotonic() - self.hero_started >= self.HERO_MS / 1000:
+                self.hero = None
+                self.hero_timer = 0
+                if done is not None:
+                    done()
+                return False
+            return True
+
+        self.hero_timer = GLib.timeout_add(33, tick)
+        self.queue_draw()
+
     def _loaded(self, path: str, texture: Gdk.Texture | None) -> None:
         if path != self.path:
             return
+        trace("backdrop loaded")
         self.previous, self.texture = self.texture, texture
+        if texture is not None and not self.get_mapped():
+            # not on screen yet: blur it now at the output's size, so the first
+            # full-screen frame finds it ready
+            display = Gdk.Display.get_default()
+            monitors = display.get_monitors() if display is not None else None
+            if monitors is not None and monitors.get_n_items():
+                geometry = monitors.get_item(0).get_geometry()
+                self._blurred_backdrop(texture, geometry.width, geometry.height)
         self.fade_from = time.monotonic()
         if self.previous is not None and self.get_mapped():
             if not self.tick_id:
@@ -225,19 +341,24 @@ class CoverBackdrop(Gtk.Widget):
         renderer = native.get_renderer() if native is not None else None
         if renderer is None:
             return None
+        # at quarter size: a blur looks the same scaled up and renders 16x faster,
+        # which keeps the main loop free when the window changes size
+        q = 4
+        qw, qh = max(1, int(w / q)), max(1, int(h / q))
         snapshot = Gtk.Snapshot()
         sc = Scene(snapshot)
         tw, th = texture.get_width(), texture.get_height()
-        zoom = max(w / max(1, tw), h / max(1, th))
+        zoom = max(qw / max(1, tw), qh / max(1, th))
         bw, bh = tw * zoom, th * zoom
-        snapshot.push_blur(self.BLUR)
-        sc.cover(Image(texture, tw, th), (w - bw) / 2, (h - bh) / 2, bw, bh)
+        snapshot.push_blur(self.BLUR / q)
+        sc.cover(Image(texture, tw, th), (qw - bw) / 2, (qh - bh) / 2, bw, bh)
         snapshot.pop()
-        sc.rect(0, 0, w, h, (0, 0, 0), 0.35)
+        sc.rect(0, 0, qw, qh, (0, 0, 0), 0.35)
         node = snapshot.to_node()
         if node is None:
             return None
-        blurred = renderer.render_texture(node, Graphene.Rect().init(0, 0, w, h))
+        trace("backdrop blur render")
+        blurred = renderer.render_texture(node, Graphene.Rect().init(0, 0, qw, qh))
         self.blurred = (key, blurred)
         return blurred
 
@@ -246,6 +367,18 @@ class CoverBackdrop(Gtk.Widget):
             texture.get_width(), texture.get_height(), w, h, self.get_scale_factor() or 1
         )
         img = Image(texture, texture.get_width(), texture.get_height())
+        if self.hero is not None:
+            # the entry moment: from the window's cover to the screen, corners rounding off
+            if not self.hero_started:
+                self.hero_started = time.monotonic()
+            t = ease_out((time.monotonic() - self.hero_started) * 1000 / self.HERO_MS)
+            hx, hy, hw, hh = self.hero
+            x, y = lerp(hx, fit.x, t), lerp(hy, fit.y, t)
+            cw, ch = lerp(hw, fit.w, t), lerp(hh, fit.h, t)
+            radius = lerp(self.HERO_RADIUS, 0.0 if fit.mode == "fill" else self.FRAME_RADIUS, t)
+            with sc.rounded_clip(x, y, cw, ch, max(0.5, radius)):
+                sc.cover(img, x, y, cw, ch)
+            return
         if alpha < 0.999:
             snapshot.push_opacity(alpha)
         if fit.mode == "fill":
@@ -260,12 +393,19 @@ class CoverBackdrop(Gtk.Widget):
         if alpha < 0.999:
             snapshot.pop()
 
+    def blurred_texture(self) -> Gdk.Texture | None:
+        """The blurred, darkened cover at the view's size, for glass panels over it."""
+        w, h = self.get_width(), self.get_height()
+        if self.mode != "art" or self.texture is None or w <= 0 or h <= 0:
+            return None
+        return self._blurred_backdrop(self.texture, w, h)
+
     def do_snapshot(self, snapshot) -> None:
         w, h = self.get_width(), self.get_height()
+        if self.mode != "art":
+            return  # clear: the album field under us shows through
         sc = Scene(snapshot)
         sc.rect(0, 0, w, h, (0, 0, 0), 1.0)
-        if self.mode != "art":
-            return
         t = min(1.0, (time.monotonic() - self.fade_from) / self.FADE_SECONDS)
         for texture, alpha in ((self.previous, 1.0), (self.texture, t if self.previous else 1.0)):
             if texture is not None:

@@ -22,10 +22,11 @@ from gi.repository import Gdk, GLib, Gtk
 
 from encoregui.cover import CoverBackdrop, CoverView
 from encoregui.field import AlbumField
+from encoregui.glass import GlassPanel
 from encoregui.home import SeekBar, Transport, VolumeControl, cover_path, meta_labels, set_meta
 from encoregui.lyrics import LyricsEngine
 from encoregui.popovers import build_look_menu
-from encoregui.ui import icon_button
+from encoregui.ui import icon_button, trace
 from encorelib.look import read_look
 from encorelib.screen import screen_state
 from encorelib.stageflag import render as render_flag
@@ -47,10 +48,12 @@ class FullPage(Gtk.Overlay):
         self.style_buttons: dict[str, Gtk.Button] = {}
         self.monitor_handler = 0
 
-        # what is shown: the show (backdrop and lyrics) or the idle field
+        # what is shown: the show (field, backdrop and lyrics) or the idle field
         self.show = Gtk.Overlay()
+        self.clear_field = AlbumField()  # under a clear background: black light, not a void
+        self.show.set_child(self.clear_field)
         self.backdrop = CoverBackdrop()
-        self.show.set_child(self.backdrop)
+        self.show.add_overlay(self.backdrop)
         self.canvas_holder = Gtk.Overlay()
         self.canvas_holder.set_child(Gtk.Box())
         self.show.add_overlay(self.canvas_holder)
@@ -86,20 +89,35 @@ class FullPage(Gtk.Overlay):
     # bars ---------------------------------------------------------------------
 
     def _revealer(self, child: Gtk.Widget, valign: Gtk.Align) -> Gtk.Revealer:
+        """A bar on glass that slides in from its edge of the screen."""
+        glass = GlassPanel(child)
+        glass.set_backdrop(self.backdrop.blurred_texture, self.backdrop)
+        glass.set_halign(Gtk.Align.FILL)
+        glass.set_margin_start(22)
+        glass.set_margin_end(22)
+        if valign == Gtk.Align.START:
+            glass.set_margin_top(18)
+        else:
+            glass.set_margin_bottom(22)
         revealer = Gtk.Revealer()
-        revealer.set_transition_type(Gtk.RevealerTransitionType.CROSSFADE)
+        revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_DOWN
+            if valign == Gtk.Align.START
+            else Gtk.RevealerTransitionType.SLIDE_UP
+        )
         revealer.set_transition_duration(BAR_FADE_MS)
         revealer.set_valign(valign)
-        revealer.set_child(child)
+        revealer.set_child(glass)
         revealer.set_reveal_child(True)
         return revealer
 
     def _build_top(self) -> Gtk.Widget:
         bar = Gtk.Box(spacing=10)
         bar.add_css_class("fullbar")
-        bar.set_margin_top(18)
-        bar.set_margin_start(22)
-        bar.set_margin_end(22)
+        for side in ("top", "bottom"):
+            getattr(bar, f"set_margin_{side}")(10)
+        bar.set_margin_start(14)
+        bar.set_margin_end(14)
         exit_button = Gtk.Button()
         exit_button.add_css_class("pill")
         box = Gtk.Box(spacing=6)
@@ -140,9 +158,10 @@ class FullPage(Gtk.Overlay):
     def _build_bottom(self) -> Gtk.Widget:
         bar = Gtk.Box(spacing=16)
         bar.add_css_class("fullbar")
-        bar.set_margin_bottom(22)
-        bar.set_margin_start(26)
-        bar.set_margin_end(26)
+        for side in ("top", "bottom"):
+            getattr(bar, f"set_margin_{side}")(8)
+        bar.set_margin_start(16)
+        bar.set_margin_end(22)
         self.thumb = CoverView(56)
         self.thumb.PAD = 10
         self.thumb.set_size_request(76, 76)
@@ -200,6 +219,7 @@ class FullPage(Gtk.Overlay):
 
     def enter(self) -> None:
         """Start drawing: a fresh engine sized to the output the window is on."""
+        trace("full.enter")
         if self.engine is None:
             self.engine = LyricsEngine(self.win.cfg, self.win.runtime_dir, desktop=False)
             self.engine.on_style_changed = lambda _s: self._sync_look()
@@ -267,7 +287,11 @@ class FullPage(Gtk.Overlay):
     def update(self, state: dict, colors) -> None:
         mode = screen_state(state, time.monotonic())
         self.pages.set_visible_child_name("idle" if mode == "idle" else "show")
-        self.idle_field.set_colors(colors)
+        motion = read_look(self.win.look_path).get("motion", True)
+        for field in (self.idle_field, self.clear_field):
+            field.set_colors(colors)
+            field.set_playing(state.get("status") == "playing")
+            field.set_motion(motion)
         set_meta(self.title, self.artist, state)
         self.seek.update(state)
         self.transport.update(state)
@@ -288,6 +312,7 @@ class FullPage(Gtk.Overlay):
                     button.remove_css_class("on")
         background = look.get("stage_bg", "art")
         self.backdrop.set_mode(background)
+        self.clear_field.set_visible(background == "clear")  # under a cover it would only cost
         label = "Cover" if background == "art" else "Clear"
         if self.bg_button.get_label() != label:
             self.bg_button.set_label(label)

@@ -23,6 +23,7 @@ from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk
 
 from encoregui.cover import load_texture
 from encoregui.scene import Image, Scene
+from encoregui.ui import trace
 from encorelib.motion import blob_center, grain_texture_bytes
 
 PLAY_FPS = 1  # the blobs move a few px/s under an 80 px blur: steps are invisible at 1 fps
@@ -70,8 +71,9 @@ class AlbumField(Gtk.Widget):
     # inputs -----------------------------------------------------------------
 
     def set_colors(self, colors) -> None:
-        self.colors = colors
-        self.queue_draw()
+        if colors is not self.colors:  # the scheme is rebuilt only when the palette changes
+            self.colors = colors
+            self.queue_draw()
 
     def set_cover(self, path: str) -> None:
         if path == self.path:
@@ -146,19 +148,23 @@ class AlbumField(Gtk.Widget):
         renderer = native.get_renderer() if native is not None else None
         if renderer is None or self.texture is None:
             return None
+        # at quarter size: the blur looks the same scaled up and renders 16x faster
+        q = 4
+        qw, qh = max(1, int(w / q)), max(1, int(h / q))
         snapshot = Gtk.Snapshot()
         sc = Scene(snapshot)
         tw, th = self.texture.get_width(), self.texture.get_height()
-        zoom = max(w / max(1, tw), h / max(1, th)) * 1.15  # overscan hides the blur's edge
+        zoom = max(qw / max(1, tw), qh / max(1, th)) * 1.15  # overscan hides the blur's edge
         bw, bh = tw * zoom, th * zoom
-        snapshot.push_blur(BLUR)
-        sc.cover(Image(self.texture, tw, th), (w - bw) / 2, (h - bh) / 2, bw, bh)
+        snapshot.push_blur(BLUR / q)
+        sc.cover(Image(self.texture, tw, th), (qw - bw) / 2, (qh - bh) / 2, bw, bh)
         snapshot.pop()
-        sc.rect(0, 0, w, h, (0, 0, 0), WASH)
+        sc.rect(0, 0, qw, qh, (0, 0, 0), WASH)
         node = snapshot.to_node()
         if node is None:
             return None
-        blurred = renderer.render_texture(node, Graphene.Rect().init(0, 0, w, h))
+        trace("field blur render")
+        blurred = renderer.render_texture(node, Graphene.Rect().init(0, 0, qw, qh))
         self.blurred = (key, blurred)
         return blurred
 
@@ -198,6 +204,7 @@ class AlbumField(Gtk.Widget):
         node = snapshot.to_node()
         if node is None:
             return None
+        trace("light render")
         texture = renderer.render_texture(node, Graphene.Rect().init(0, 0, qw, qh))
         self.light = (key, texture)
         return texture

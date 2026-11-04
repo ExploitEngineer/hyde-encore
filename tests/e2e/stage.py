@@ -180,6 +180,9 @@ def main() -> int:
     parser.add_argument(
         "--relaunch", action="store_true", help="launch Encore a second time: one window must stay"
     )
+    parser.add_argument(
+        "--then", default="", help="after --app opens, switch to this page (clipped)"
+    )
     parser.add_argument("--cover", default="", help="cover image (default: newest cached)")
     parser.add_argument("--no-player", action="store_true", help="no music player: the idle screen")
     parser.add_argument("--no-lyrics", action="store_true", help="no lyrics for the song")
@@ -200,6 +203,8 @@ def main() -> int:
         # which makes GtkApplication registration fail and the surface exit
         h.env.update(ENCORE_OVERLAY_MONITOR=LAB, ENCORE_GLOW_MONITOR=LAB, GTK_A11Y="none")
         h.env["ENCORE_FULL_HIDE_MS"] = "600000"  # stills show the full-screen bars
+        if os.environ.get("ENCORE_TRACE"):  # the harness drops ENCORE_* keys: pass the trace file
+            h.env["ENCORE_TRACE"] = os.environ["ENCORE_TRACE"]
         if args.long_lyrics:
             long_lrc = "".join(
                 f"[{t // 60:02d}:{t % 60:02d}.00]Line {i + 1} of a very long song that keeps on going\n"
@@ -309,6 +314,9 @@ def run_stage(args, h: Harness, lab: Lab, out: Path, player: subprocess.Popen | 
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            if args.then:
+                time.sleep(0.8)  # the recorder is rolling: the switch lands inside the clip
+                launch_app(h, args.then, "app-then.log").wait(10)
             time.sleep(args.clip)
             rec.send_signal(signal.SIGINT)
             rec.wait(10)

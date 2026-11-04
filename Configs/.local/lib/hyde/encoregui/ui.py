@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import glob
+import os
+import time
 
 import gi
 
@@ -99,6 +101,10 @@ menubutton.chip > button:hover {{ background: rgba(255,255,255,0.11); }}
 .lyric.message {{ color: rgba(236,236,240,0.55); font-size: 18px; font-weight: 600; }}
 .lyric.seekable:hover {{ color: rgba(236,236,240,0.75); }}
 .lyric.seekable.current:hover {{ color: #f4f4f7; }}
+.glass button.pill, .glass button.round {{ background: rgba(255,255,255,0.07); box-shadow: none;
+                                            border-color: rgba(255,255,255,0.08); }}
+.glass button.pill:hover, .glass button.round:hover {{ background: rgba(255,255,255,0.14); }}
+.glass button.round.big {{ background: {UI_FG}; }}
 .fullbar .title {{ font-size: 15px; }} .fullbar .artist {{ font-size: 12px; }}
 .fullbar .time {{ color: rgba(255,255,255,0.75); }}
 """
@@ -162,6 +168,14 @@ def accent_rules(colors) -> str:
         f"switch:checked {{ background: #{h}; }}\n"
         f"button.item:hover {{ background: #{h}; color: #{on}; }}\n"
     )
+
+
+def trace(what: str) -> None:
+    """Timing breadcrumbs for the stage tool: appended to $ENCORE_TRACE when set."""
+    path = os.environ.get("ENCORE_TRACE")
+    if path:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{time.monotonic():.3f} {what}\n")
 
 
 def install_css() -> None:
