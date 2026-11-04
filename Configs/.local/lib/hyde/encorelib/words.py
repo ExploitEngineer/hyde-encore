@@ -73,10 +73,14 @@ def split_words(text: str) -> list[str]:
 
 
 def join_words(tokens: list[str]) -> str:
-    """Join words with spaces, except where either side of the seam is CJK."""
+    """Join words with spaces, except between two CJK characters.
+
+    A Latin word next to CJK keeps its space ("I love you 君を"): an extra
+    space reads fine, two glued words do not.
+    """
     out = ""
     for token in tokens:
-        if out and token and not (is_cjk(out[-1]) or is_cjk(token[0])):
+        if out and token and not (is_cjk(out[-1]) and is_cjk(token[0])):
             out += " "
         out += token
     return out

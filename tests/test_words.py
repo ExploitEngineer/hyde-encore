@@ -36,14 +36,16 @@ def test_split_blank():
 
 
 def test_join_words_cjk_seams():
-    assert join_words(["夜", "に", "Lemon", "go"]) == "夜にLemon go"
+    # no space only between two CJK characters; mixed seams keep words apart
+    assert join_words(["夜", "に", "Lemon", "go"]) == "夜に Lemon go"
+    assert join_words(["I", "love", "you", "君", "を"]) == "I love you 君を"
     assert join_words(["hello", "world"]) == "hello world"
     assert join_words([]) == ""
 
 
 def test_join_round_trips_split():
     # mixed Latin/CJK spacing is not recoverable from tokens; pure scripts are
-    for text in ("夜に駆ける", "hello world", "夢。ok!", "사랑해 너를"):
+    for text in ("夜に駆ける", "hello world", "夢。「夜」", "사랑해 너를"):
         assert join_words(split_words(text)) == text
 
 
