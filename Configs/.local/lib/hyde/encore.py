@@ -213,6 +213,9 @@ class Encore:
             return
         info, art_url = found
         if self.track is not None and track_key(info) == track_key(self.track):
+            # same song, maybe from another player: keep the lyrics, but take the
+            # new player, track id and url so clients control the right player
+            self.track = info
             if art_url != self.art_url:
                 self.art_url = art_url
                 self.start_palette(info, art_url)
