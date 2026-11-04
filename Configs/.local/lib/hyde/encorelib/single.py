@@ -8,9 +8,12 @@ a file nobody holds locked.
 from __future__ import annotations
 
 import fcntl
+import logging
 import os
 from pathlib import Path
 from typing import IO
+
+log = logging.getLogger("encore")
 
 _held: dict[str, IO[str]] = {}
 
@@ -48,12 +51,20 @@ def claim(path: Path) -> bool:
     except OSError:
         handle.close()
         return False
+    try:
+        _record(handle)
+    except OSError as error:  # a full runtime dir: the lock holds, the pid is a courtesy
+        log.warning("pidfile %s: %s (lock held without it)", path, error)
+    _held[str(path)] = handle
+    return True
+
+
+def _record(handle: IO[str]) -> None:
+    """Write our pid into the locked pidfile, for `read_pid` and the app's toggles."""
     handle.seek(0)
     handle.truncate()
     handle.write(f"{os.getpid()}\n")
     handle.flush()
-    _held[str(path)] = handle
-    return True
 
 
 def release(path: Path) -> None:

@@ -63,6 +63,25 @@ class FetchGate:
         return token == self._token and key == self._key
 
 
+class Quiet:
+    """Speak about a recurring trouble once per interval: the first failure logs,
+    repeats stay quiet until the interval passes or the trouble clears."""
+
+    def __init__(self, interval: float = 60.0):
+        self.interval = interval
+        self._last: dict[str, float] = {}
+
+    def should(self, key: str, now: float) -> bool:
+        last = self._last.get(key)
+        if last is not None and now - last < self.interval:
+            return False
+        self._last[key] = now
+        return True
+
+    def clear(self, key: str) -> None:
+        self._last.pop(key, None)
+
+
 def order_by_recency(names: list[str], recent: list[str]) -> list[str]:
     """Names reordered so the most recently started players come first."""
     rank = {name: i for i, name in enumerate(recent)}

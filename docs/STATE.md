@@ -48,7 +48,8 @@ Current shape: Encore is an app (DECISIONS #29) with its own identity (#35); the
 - Upstream: Discussion, then small PRs (hyprlock.sh symlink and player fixes, start_up.lua hc.start iteration, encore).
 
 ## Known facts
-- `/run/user/1000` (1.6 GB tmpfs) is 100% full of `checkupdates_db_*` dirs left by HyDE's waybar update checker, with dozens of `checkupdates`/`pacman -Sy` processes asleep behind them (not ours, not swept); the test harness falls back to /tmp.
+- HyDE's waybar update checker can fill `/run/user/1000` (1.6 GB tmpfs) with `checkupdates_db_*` dirs behind stuck `checkupdates`/`pacman -Sy` processes (seen at 100%, 254 dirs, 2026-11-05; killing the checkers freed it). Encore now survives a full runtime dir (DECISIONS #38); the test harness falls back to /tmp.
+- Detached surfaces and the app's commands log to `$XDG_CACHE_HOME/hyde/encore/logs/<name>.log` (`overlay.log`, `glow.log`, `app-commands.log`); the daemon logs to the journal under `hyde-Hyprland-encore.service`.
 - GTK 4.24 ignores an opacity node over a repeat node: the grain's strength is baked into its texture.
 - HyDE bugs found (candidate small PRs): `hyprlock.sh find_filepath` does not follow symlinked layouts; `hyprlock.sh fn_mpris` reads the first listed player; `start_up.lua` runs only the `hc.start` keys it names.
 - Hyprland 0.56 moves a workspace back to the monitor it was last on, so a reused headless monitor name pulls one of the owner's workspaces onto it; `stage.py` names its lab monitor per run and refuses to run if that happens. Its Lua `window.close` dispatcher accepted a selector without closing the window; the lab tests use the app's `close` GTK action instead.

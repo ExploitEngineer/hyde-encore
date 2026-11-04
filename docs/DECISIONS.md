@@ -175,3 +175,8 @@ Every surface lights a word 120 ms before its timestamp (`lyricview.LEAD_SECONDS
 In the stack and visual styles a word held longer is drawn bigger: `motion.held_scale` grows from 1.0 at 0.3 s to 1.18 at 1.2 s and caps there, so a long note never overflows its slot.
 Judged frame by frame next to `verci-hero.mp4`: the same three-slot rhythm, block, glyphs and serif words, and the big word spans about the same share of the frame.
 The optional Lens style was skipped: the plan allowed it only within budget, and animated pages already sit above it (#36).
+
+## 38. 2026-11-05 - Runtime files are a courtesy: a full tmpfs never hides a surface - Active
+The owner's first run on the real screen showed nothing: `/run/user/1000` was full (HyDE's update checker had leaked 254 pacman db dirs), `single.claim` crashed writing the overlay's pid, `encore toggle` died with its stderr in `/dev/null`, and the daemon logged a traceback twenty times a second while leaking a `.tmp` per attempt.
+Now the flock is the lock and the pid text is best effort (`single._record`), every runtime file goes through `encorelib/files.py` (temp beside the target, renamed in, removed on failure), the daemon's `publish` keeps serving the socket when the lock-screen files cannot be written and says so once a minute (`session.Quiet`), and detached surfaces and the app's commands write their stderr to `$XDG_CACHE_HOME/hyde/encore/logs/<name>.log`.
+The leak itself is HyDE's (`checkupdates` under waybar); Encore reports it, never sweeps it.

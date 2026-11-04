@@ -18,11 +18,9 @@ import argparse
 import json
 import logging
 import os
-import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -37,6 +35,7 @@ from encorelib.artwork import hd_art
 from encorelib.cache import LyricsCache
 from encorelib.clock import PlaybackClock, clean_rate
 from encorelib.config import EncoreConfig, load_config
+from encorelib.files import copy_atomic, write_atomic
 from encorelib.jobs import LatestJobs
 from encorelib.journal import append_capped, read_lines
 from encorelib.look import (
@@ -58,8 +57,10 @@ from encorelib.protocol import (
     read_state,
 )
 from encorelib.providers import TrackInfo, track_key
+from encorelib.service import surface_log
 from encorelib.session import (
     FetchGate,
+    Quiet,
     guarded,
     micros_to_seconds,
     order_by_recency,
@@ -88,14 +89,6 @@ CACHE_DIR = xdg_cache_home() / "hyde" / "encore"
 
 TICK_MS = 50
 RESYNC_TICKS = 20  # resync the clock with the player every second
-
-
-def write_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp, path)
 
 
 def read_pin() -> str | None:
@@ -140,6 +133,7 @@ class Encore:
         self.palette: dict[str, str] = wallpaper_palette()
         self.theme = wallpaper_palette()  # the HyDE theme, for grey covers
         self.shown_cover: Path | None = None
+        self.quiet = Quiet()  # a full runtime dir is said once a minute, not 20 times a second
         self.tick_id = 0
         self.ticks = 0
         self.recent: list[str] = []
@@ -506,18 +500,25 @@ class Encore:
         if cover is None:
             COVER_PATH.unlink(missing_ok=True)
             return
-        tmp = COVER_PATH.with_suffix(".tmp.png")
-        shutil.copyfile(cover, tmp)
-        os.replace(tmp, COVER_PATH)
+        copy_atomic(cover, COVER_PATH)
 
     def publish(self) -> None:
         cursor = locate(self.lyrics, self.clock.position()) if self.lyrics else NO_CURSOR
         self.last_cursor = (cursor.line, cursor.word)
         accent, dim = hyprlock_colors(self.cfg, self.palette, self.theme)
         markup = hyprlock_markup(self.lyrics, cursor, accent, dim) if self.track else ""
-        write_atomic(HYPRLOCK_PATH, markup + "\n" if markup else "")
-        write_atomic(TRACK_PATH, hyprlock_track(self.track))
-        self.show_cover()
+        try:
+            write_atomic(HYPRLOCK_PATH, markup + "\n" if markup else "")
+            write_atomic(TRACK_PATH, hyprlock_track(self.track))
+            self.show_cover()
+        except OSError as error:
+            # the lock screen files are a courtesy; the socket below still serves
+            # every surface, and the cover is tried again on the next publish
+            self.shown_cover = None
+            if self.quiet.should("runtime", time.monotonic()):
+                logger.warning(f"runtime files not written: {error}; state still on the socket")
+        else:
+            self.quiet.clear("runtime")
         self.server.broadcast(
             build_state(
                 self.status(),
@@ -537,12 +538,13 @@ class Encore:
 def _spawn_surface(*args: str) -> None:
     """Start a surface as its own detached process via encore.sh (LD_PRELOAD)."""
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encore.sh")
-    subprocess.Popen(
-        ["bash", script, *args],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    with open(surface_log(args[0]), "w", encoding="utf-8") as log_file:  # why it died, if it dies
+        subprocess.Popen(
+            ["bash", script, *args],
+            start_new_session=True,
+            stdout=log_file,
+            stderr=log_file,
+        )
 
 
 def spawn_overlay() -> None:

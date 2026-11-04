@@ -38,6 +38,7 @@ from encorelib.motion import ease_out, lerp
 from encorelib.palette import wallpaper_palette
 from encorelib.protocol import read_state
 from encorelib.screen import screen_state
+from encorelib.service import surface_log
 from encorelib.session import player_label
 from encorelib.single import pid_alive, read_pid
 from encorelib.transport import key_action, step_volume
@@ -364,9 +365,9 @@ class EncoreWindow(Gtk.ApplicationWindow):
 
     @staticmethod
     def run(cmd: list[str]) -> None:
-        subprocess.Popen(
-            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
-        )
+        # a command's complaint lands in the cache log, never in /dev/null
+        with open(surface_log("app-commands"), "a", encoding="utf-8") as log_file:
+            subprocess.Popen(cmd, stdout=log_file, stderr=log_file, start_new_session=True)
 
     def encore(self, *args: str) -> None:
         """Run an encore command with this window's environment."""

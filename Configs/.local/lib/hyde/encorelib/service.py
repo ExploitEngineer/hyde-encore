@@ -18,6 +18,16 @@ CONNECT_TIMEOUT = 0.5
 START_TIMEOUT = 10.0
 
 
+def surface_log(name: str, env: Mapping[str, str] | None = None) -> Path:
+    """Where a detached surface (overlay, glow, a CLI the app ran) writes its
+    stderr, so why one died can be read instead of lost to /dev/null."""
+    e = os.environ if env is None else env
+    cache = Path(e.get("XDG_CACHE_HOME") or Path(e.get("HOME", "~")).expanduser() / ".cache")
+    path = cache / "hyde" / "encore" / "logs" / f"{name}.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def daemon_unit(desktop: str) -> str:
     """The unit name HyDE's `hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-...` uses."""
     return f"hyde-{desktop or 'Hyprland'}-encore.service"
