@@ -30,6 +30,8 @@ def build_state(
     clock: PlaybackClock,
     palette: dict[str, str],
     cover: Path | None = None,
+    players: tuple[str, ...] | list[str] = (),
+    volume: float | None = None,
 ) -> dict:
     """The state line; `art` is the 512 px lock copy, `cover` the best full-size cover."""
     position, ts = clock.anchor()
@@ -61,6 +63,8 @@ def build_state(
         "ts": ts,
         "status": status,
         "player": track.player if track else None,
+        "players": list(players),  # every MPRIS player present, most recent first
+        "volume": volume,  # the followed player's 0-1 volume; None when it has none
         "track": (
             {
                 "key": track_key(track),

@@ -1,4 +1,4 @@
-from encorelib.session import FetchGate, order_by_recency, pick_player
+from encorelib.session import FetchGate, order_by_recency, pick_player, player_label
 
 
 def test_playing_beats_paused_regardless_of_order():
@@ -25,6 +25,35 @@ def test_none_when_nothing_matches():
     assert pick_player([], ()) is None
     assert pick_player([("mpv", "Stopped")], ()) is None
     assert pick_player([("mpv", "Playing")], ("spotify",)) is None
+
+
+def test_pin_wins_over_playing():
+    players = [("spotify", "Playing"), ("brave.instance7", "Paused")]
+    assert pick_player(players, (), pin="brave.instance7") == "brave.instance7"
+
+
+def test_pin_by_base_name_matches_instance():
+    players = [("spotify", "Playing"), ("brave.instance7", "Paused")]
+    assert pick_player(players, (), pin="brave") == "brave.instance7"
+
+
+def test_pin_wins_over_allow_list_and_stopped():
+    players = [("spotify", "Playing"), ("mpv", "Stopped")]
+    assert pick_player(players, ("spotify",), pin="mpv") == "mpv"
+
+
+def test_absent_pin_is_ignored():
+    assert pick_player([("spotify", "Paused")], (), pin="mpv") == "spotify"
+    assert pick_player([("spotify", "Paused")], (), pin="") == "spotify"
+
+
+def test_player_label():
+    assert player_label("spotify") == "Spotify"
+    assert player_label("brave.instance1234") == "Brave"
+    assert player_label("chromium.instance9") == "Chromium"
+    assert player_label("vlc") == "VLC"
+    assert player_label("some_player") == "Some Player"
+    assert player_label("") == "Automatic"
 
 
 def test_fetch_gate_drops_stale_results():

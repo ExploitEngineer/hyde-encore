@@ -1,7 +1,10 @@
 import signal
+import subprocess
+import sys
 import time
 
 import pytest
+from harness import LIB
 
 pytestmark = pytest.mark.e2e
 
@@ -174,3 +177,70 @@ def test_lookups_are_journaled(playing):
         for line in (playing.run / "hyde" / "encore.lookups").read_text().splitlines()
     ]
     assert rows[-1]["title"] == TITLE and rows[-1]["result"] == "local/line"
+
+
+def run_cli(h, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(LIB / "encore.py"), *args],
+        env=h.env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+
+def test_state_lists_players_newest_first(harness):
+    harness.start_player("encoretest")
+    harness.start_player("encoretest2")
+    harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    harness.wait(lambda s: s["player"] == "encoretest")
+    harness.ctl("encoretest2", "play")
+    state = harness.wait(lambda s: (s.get("players") or [""])[0] == "encoretest2")
+    assert sorted(state["players"]) == ["encoretest", "encoretest2"]
+
+
+def test_volume_published_and_follows_changes(playing):
+    playing.wait(lambda s: s["volume"] == 1.0)
+    playing.ctl("encoretest", "volume", "0.4")
+    playing.wait(lambda s: s["volume"] == 0.4)
+
+
+def test_volume_null_when_player_has_none(harness):
+    harness.start_player("encoretest", "", "--no-volume")
+    harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    harness.wait(lambda s: s["status"] == "playing")
+    # Rate is read through the same proxy as Volume: once it shows, the proxy is live
+    harness.set_rate("encoretest", 1.5)
+    state = harness.wait(lambda s: s["rate"] == 1.5)
+    assert state["volume"] is None
+
+
+def test_follow_pin_switches_and_clears(harness):
+    harness.start_player("encoretest")
+    second = harness.start_player("encoretest2")
+    harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    harness.wait(lambda s: s["player"] == "encoretest")
+    assert run_cli(harness, "follow", "encoretest2").returncode == 0
+    harness.wait(lambda s: s["player"] == "encoretest2")
+    follow = harness.run / "hyde" / "encore.follow"
+    assert follow.read_text().strip() == "encoretest2"
+    second.terminate()
+    second.wait(timeout=5)
+    harness.wait(lambda s: s["player"] == "encoretest")
+    harness.wait_until(lambda: not follow.exists(), "the pin to clear")
+
+
+def test_follow_auto_removes_pin(harness):
+    harness.start_player("encoretest")
+    harness.start_player("encoretest2")
+    harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    run_cli(harness, "follow", "encoretest2")
+    harness.wait(lambda s: s["player"] == "encoretest2")
+    assert run_cli(harness, "follow", "auto").returncode == 0
+    harness.wait(lambda s: s["player"] == "encoretest")
+    assert not (harness.run / "hyde" / "encore.follow").exists()

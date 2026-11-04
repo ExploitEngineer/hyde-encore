@@ -69,6 +69,7 @@ HYPRLOCK_PATH = RUNTIME_DIR / "encore.hyprlock"
 TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
 OVERLAY_PIDFILE = RUNTIME_DIR / "encore-overlay.pid"
 LOOK_PATH = RUNTIME_DIR / "encore.look"
+FOLLOW_PATH = RUNTIME_DIR / "encore.follow"  # a player the user picked by hand
 GLOW_PIDFILE = RUNTIME_DIR / "encore-glow.pid"
 LOOKUPS_PATH = RUNTIME_DIR / "encore.lookups"  # the last 50 lyric lookups
 PLAYER_PIDFILE = RUNTIME_DIR / "encore-player.pid"
@@ -86,6 +87,13 @@ def write_atomic(path: Path, text: str) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
     os.replace(tmp, path)
+
+
+def read_pin() -> str | None:
+    try:
+        return FOLLOW_PATH.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
 
 
 class Encore:
@@ -123,11 +131,18 @@ class Encore:
         self.tick_id = 0
         self.ticks = 0
         self.recent: list[str] = []
+        self.pin = read_pin()
         self.last_cursor = None
         # MPRIS Rate of the followed player; Playerctl does not expose it
         self.rate_proxy = None
         self.rate_instance: str | None = None
         self.rate_handler = 0
+
+        # the player chip and `encore follow` pin a player through FOLLOW_PATH
+        self.follow_monitor = Gio.File.new_for_path(str(FOLLOW_PATH)).monitor_file(
+            Gio.FileMonitorFlags.NONE, None
+        )
+        self.follow_monitor.connect("changed", self.on_follow_changed)
 
         self.manager = Playerctl.PlayerManager()
         self.manager.connect("name-appeared", self.on_name_appeared)
@@ -161,7 +176,27 @@ class Encore:
     def on_player_vanished(self, _manager, player) -> None:
         if self.is_current(player):
             self.player = None
+        if self.pin and pick_player([(player.props.player_instance, "")], (), self.pin):
+            # the pinned player closed: the pin goes with it, unless another
+            # instance of it (another browser window) is still there
+            gone = player.props.player_instance
+            left = [
+                (p.props.player_instance, "")
+                for p in self.manager.props.players
+                if p.props.player_instance != gone
+            ]
+            if not pick_player(left, (), self.pin):
+                self.pin = None
+                FOLLOW_PATH.unlink(missing_ok=True)
         self.choose_player()
+
+    @guarded()
+    def on_follow_changed(self, _monitor, _file, _other, _event) -> None:
+        pin = read_pin()
+        if pin != self.pin:
+            self.pin = pin
+            logger.info(f"encore pin: {pin or 'none'}")
+            self.choose_player()
 
     def status_of(self, player) -> str:
         return player.props.playback_status.value_nick
@@ -170,7 +205,7 @@ class Encore:
         players = {p.props.player_instance: p for p in self.manager.props.players}
         order = order_by_recency(list(players), self.recent)
         name = pick_player(
-            [(inst, self.status_of(players[inst])) for inst in order], self.cfg.players
+            [(inst, self.status_of(players[inst])) for inst in order], self.cfg.players, self.pin
         )
         chosen = players.get(name) if name else None
         if chosen is None or not self.is_current(chosen):
@@ -214,8 +249,24 @@ class Encore:
 
     @guarded()
     def on_player_properties(self, _proxy, changed, _invalidated) -> None:
-        if "Rate" in changed.unpack():
+        props = changed.unpack()
+        if "Rate" in props:
             self.refresh_playback()
+        elif "Volume" in props:
+            self.publish()
+
+    def player_volume(self) -> float | None:
+        """The followed player's MPRIS Volume, None when it does not offer one."""
+        if self.rate_proxy is None:
+            return None
+        value = self.rate_proxy.get_cached_property("Volume")
+        if value is None or value.get_type_string() != "d":
+            return None
+        return max(0.0, min(1.0, round(value.unpack(), 3)))
+
+    def player_names(self) -> list[str]:
+        names = [p.props.player_instance for p in self.manager.props.players]
+        return order_by_recency(names, self.recent)
 
     def player_rate(self) -> float:
         if self.rate_proxy is None:
@@ -447,6 +498,8 @@ class Encore:
                 self.clock,
                 self.palette,
                 cover=self.cover,
+                players=self.player_names(),
+                volume=self.player_volume(),
             )
         )
 
@@ -596,6 +649,18 @@ def run_show() -> int:
         ["hyprctl", "dispatch", "workspace", "previous"], check=False, stdout=subprocess.DEVNULL
     )
     return run_profile("working")
+
+
+def run_follow(name: str) -> int:
+    """Pin the player encore follows, or 'auto' to follow the most recent one."""
+    name = name.strip()
+    if name in ("", "auto"):
+        FOLLOW_PATH.unlink(missing_ok=True)
+        print("encore follows the most recently started player")
+        return 0
+    write_atomic(FOLLOW_PATH, name + "\n")
+    print(f"encore follows {name}")
+    return 0
 
 
 def run_style(name: str) -> int:
@@ -830,6 +895,8 @@ def main(argv: list[str] | None = None) -> int:
     profile = sub.add_parser("profile", help="apply a sound setup: working or show")
     profile.add_argument("name", help="working | show")
     sub.add_parser("show", help="toggle the show workspace (full show on an empty stage)")
+    follow = sub.add_parser("follow", help="follow one player, or 'auto' for the most recent")
+    follow.add_argument("name", help="an MPRIS player name (e.g. spotify), or auto")
     sub.add_parser("status", help="print the current state as JSON")
     sub.add_parser("lookups", help="show the last lyric lookups and what they found")
     sub.add_parser("hyprlock", help="print the current lyric line as Pango markup")
@@ -865,6 +932,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"{r.get('at', ''):8}  {r.get('player', ''):14.14}  {who[:60]:60}  {r.get('result')}"
             )
         return 0
+    if args.command == "follow":
+        return run_follow(args.name)
     if args.command == "status":
         print(json.dumps(read_state(SOCKET_PATH) or {"status": "stopped"}, ensure_ascii=False))
         return 0
