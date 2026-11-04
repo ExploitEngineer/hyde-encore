@@ -23,6 +23,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +37,7 @@ from encorelib.cache import LyricsCache
 from encorelib.clock import PlaybackClock, clean_rate
 from encorelib.config import EncoreConfig, load_config
 from encorelib.jobs import LatestJobs
+from encorelib.journal import append_capped, read_lines
 from encorelib.lookup import lookup_lyrics
 from encorelib.palette import album_palette, cover_png, fetch_art, wallpaper_palette
 from encorelib.protocol import (
@@ -67,6 +69,7 @@ TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
 OVERLAY_PIDFILE = RUNTIME_DIR / "encore-overlay.pid"
 LOOK_PATH = RUNTIME_DIR / "encore.look"
 GLOW_PIDFILE = RUNTIME_DIR / "encore-glow.pid"
+LOOKUPS_PATH = RUNTIME_DIR / "encore.lookups"  # the last 50 lyric lookups
 PLAYER_PIDFILE = RUNTIME_DIR / "encore-player.pid"
 COVER_PATH = RUNTIME_DIR / "encore.cover.png"  # album art for hyprlock
 RUNTIME_FILES = (HYPRLOCK_PATH, TRACK_PATH, COVER_PATH)
@@ -281,14 +284,26 @@ class Encore:
     def fetch_lyrics(self, info: TrackInfo, token: int) -> None:
         """Worker thread: always reports back, even when a lookup blows up."""
         key = track_key(info)
-        lyrics = None
+        lyrics, result = None, "none"
         try:
             lyrics = lookup_lyrics(info, self.cfg, self.cache)
             if lyrics is not None:
                 lyrics = with_words(lyrics)
-        except Exception:
+                result = f"{lyrics.source}/{lyrics.sync}"
+        except Exception as e:
             log.exception("lyrics lookup failed")
-            lyrics = None
+            lyrics, result = None, f"error: {e}"
+        append_capped(
+            LOOKUPS_PATH,
+            {
+                "at": time.strftime("%H:%M:%S"),
+                "player": info.player,
+                "artist": info.artist,
+                "title": info.title,
+                "length": round(info.length),
+                "result": result,
+            },
+        )
         self.GLib.idle_add(self.apply_lyrics, token, key, lyrics)
 
     def apply_lyrics(self, token: int, key: str, lyrics) -> bool:
@@ -771,6 +786,7 @@ def main(argv: list[str] | None = None) -> int:
     profile.add_argument("name", help="working | show")
     sub.add_parser("show", help="toggle the show workspace (full show on an empty stage)")
     sub.add_parser("status", help="print the current state as JSON")
+    sub.add_parser("lookups", help="show the last lyric lookups and what they found")
     sub.add_parser("hyprlock", help="print the current lyric line as Pango markup")
     args = parser.parse_args(argv)
 
@@ -794,6 +810,16 @@ def main(argv: list[str] | None = None) -> int:
         return run_show()
     if args.command == "glow":
         return run_glow_cmd() if args.run else run_glow_toggle()
+    if args.command == "lookups":
+        rows = read_lines(LOOKUPS_PATH)
+        if not rows:
+            print("no lookups yet (is the encore service running?)")
+        for r in rows:
+            who = " - ".join(x for x in (r.get("artist"), r.get("title")) if x)
+            print(
+                f"{r.get('at', ''):8}  {r.get('player', ''):14.14}  {who[:60]:60}  {r.get('result')}"
+            )
+        return 0
     if args.command == "status":
         print(json.dumps(read_state(SOCKET_PATH) or {"status": "stopped"}, ensure_ascii=False))
         return 0
