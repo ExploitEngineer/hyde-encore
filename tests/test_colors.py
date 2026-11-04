@@ -95,3 +95,31 @@ def test_scheme_contrast_holds_across_hues():
             s = scheme({"1xa8": color}, {})
             assert contrast_ratio(s.accent, "101014") >= 4.5, color
             assert contrast_ratio(s.on_highlight, s.highlight) >= 4.5, color
+
+
+# a real wallbash ramp from a pink cover: muted by design, lightest shade first
+PINK_RAMP = {
+    f"1xa{i + 1}": c
+    for i, c in enumerate(
+        ["FFCCEE", "F0AAD9", "E69ACC", "C27AAA", "A3658F", "8F577C", "7D4B6C", "6B3A5B", "522944"]
+    )
+}
+
+
+def chroma(hex_color):
+    r, g, b = (int(hex_color[i : i + 2], 16) / 255 for i in (0, 2, 4))
+    return max(r, g, b) - min(r, g, b)
+
+
+def test_muted_ramp_gives_a_vivid_accent_of_its_hue():
+    s = scheme(PINK_RAMP, {})
+    assert s.source == "cover"
+    assert chroma(s.accent) >= 0.45  # not the pastel FFCCEE (chroma 0.2)
+    assert abs(hue(s.accent) - hue("E69ACC")) < 6
+    assert contrast_ratio(s.accent, "101014") >= 4.5
+
+
+def test_barely_tinted_grey_falls_back_to_the_theme():
+    tinted_grey = {f"1xa{i}": c for i, c in enumerate(["B0B0C8", "9898AC", "707080"], 1)}
+    s = scheme(tinted_grey, THEME)
+    assert s.source == "theme"

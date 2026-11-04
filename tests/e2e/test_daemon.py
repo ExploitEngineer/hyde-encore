@@ -92,7 +92,8 @@ def test_shutdown_removes_runtime_files(playing):
     playing.daemon.send_signal(signal.SIGINT)
     assert playing.daemon.wait(3) == 0
     left = sorted(p.name for p in hyde.iterdir() if p.name.startswith("encore"))
-    assert left == []
+    # the lookup journal outlives a restart on purpose: it explains missing lyrics
+    assert left == ["encore.lookups"]
 
 
 TRACKS = [(ARTIST, TITLE), ("The Weeknd", "Blinding Lights")]  # fake_mpris order
@@ -163,3 +164,13 @@ def test_polling_while_paused_does_not_leak_fds(playing):
     for _ in range(300):  # two minutes of the player window's 400 ms polling
         assert playing.state()["status"] == "paused"
     assert fds() - before < 10
+
+
+def test_lookups_are_journaled(playing):
+    import json
+
+    rows = [
+        json.loads(line)
+        for line in (playing.run / "hyde" / "encore.lookups").read_text().splitlines()
+    ]
+    assert rows[-1]["title"] == TITLE and rows[-1]["result"] == "local/line"

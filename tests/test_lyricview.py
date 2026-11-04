@@ -221,3 +221,32 @@ def test_lyric_row_outro_keeps_last_row():
 def test_lyric_row_intro_and_no_lyrics():
     assert lyric_row(row_state(gap={"after": -1, "until": 1.0})) == -1
     assert lyric_row({}) == -1
+
+
+def test_column_choices_are_stable_across_processes():
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; sys.path.insert(0, 'Configs/.local/lib/hyde');"
+        "from encorelib.lyricview import word_style, stagger;"
+        "print([word_style('k:3', i) for i in range(6)], round(stagger('k:3', 2, 1536), 3))"
+    )
+    outs = {
+        subprocess.run(
+            [sys.executable, "-c", code],
+            env={"PYTHONHASHSEED": seed, "PATH": "/usr/bin"},
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for seed in ("1", "2")
+    }
+    assert len(outs) == 1, outs
+
+
+def test_word_styles_mix_and_stagger_stays_small():
+    from encorelib.lyricview import stagger, word_style
+
+    assert {word_style("line", i) for i in range(30)} == {"bold", "serif", "medium"}
+    assert all(abs(stagger("line", i, 1000)) <= 25 for i in range(30))

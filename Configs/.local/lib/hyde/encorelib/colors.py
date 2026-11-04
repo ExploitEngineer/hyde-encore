@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from .palette import contrast_ratio
 
 DEFAULT_ACCENT = "B48CFF"  # soft violet: reads well on any dark desktop
-MIN_SATURATION = 0.22  # HLS saturation below this reads as grey
+MIN_CHROMA = 0.15  # below this a family reads as grey (a slight cast must not turn garish)
 DARK = "101014"  # what lyrics sit on: the overlay's shadowed text, dark desktops
 INK = "16121C"  # dark text for light highlight blocks
 _KEY = re.compile(r"^([1-4])xa([1-9])$")
@@ -79,13 +79,28 @@ def _readable(color: str, minimum: float = 4.5) -> str:
     return color
 
 
+def _chroma(color: str) -> float:
+    r, g, b = _rgb(color)
+    return max(r, g, b) - min(r, g, b)
+
+
+def _vivid(color: str) -> str:
+    """The color's hue as a vivid, readable tone.
+
+    wallbash ramps are muted by design, and HLS saturation rates pale tints
+    highly, so picking a shade straight from the ramp gave pastel accents.
+    """
+    h, _lightness, s = _hls(color)
+    return _from_hls(h, 0.68, min(0.85, max(0.6, s * 1.4)))
+
+
 def _colorful(palette: dict[str, str]) -> list[str]:
-    """One representative per family that has real color, most saturated shade first."""
+    """One vivid representative per family that has real color (by chroma, not HLS)."""
     picks = []
     for shades in _families(palette):
-        vivid = [c for c in shades if _hls(c)[2] >= MIN_SATURATION and 0.15 <= _hls(c)[1] <= 0.95]
-        if vivid:
-            picks.append(max(vivid, key=lambda c: (_hls(c)[2], contrast_ratio(c, DARK))))
+        best = max(shades, key=_chroma)
+        if _chroma(best) >= MIN_CHROMA:
+            picks.append(_vivid(best))
     return picks
 
 

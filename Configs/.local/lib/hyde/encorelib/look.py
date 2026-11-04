@@ -49,6 +49,8 @@ def _valid(key: str, value) -> bool:
         return isinstance(value, int) and not isinstance(value, bool) and 10 <= value <= 100
     if key in ("next_line", "motion", "glow_override"):
         return isinstance(value, bool)
+    if key == "glow_monitor":  # a connector name, e.g. "eDP-1"
+        return isinstance(value, str) and 0 < len(value) <= 64
     return False
 
 

@@ -7,6 +7,7 @@ whether a frame clock is needed, and when the next visual change is due.
 
 from __future__ import annotations
 
+import zlib
 from dataclasses import dataclass
 
 from .timing import GAP_HOLD_SECONDS
@@ -139,3 +140,18 @@ def next_word_boundary(state: dict | None, now: float) -> float | None:
         if position < hide_at:
             return (hide_at - position) / rate
     return None
+
+
+def _stable_unit(*parts) -> float:
+    """A repeatable 0..1 value for these parts (Python's hash() is per process)."""
+    return zlib.crc32(repr(parts).encode("utf-8")) / 0x1_0000_0000
+
+
+def word_style(line_key: str, index: int) -> str:
+    """Typeface of a column word: the same song always gets the same mix."""
+    return ("bold", "serif", "medium")[int(_stable_unit(line_key, index) * 3)]
+
+
+def stagger(line_key: str, index: int, width: float) -> float:
+    """Horizontal zig-zag of a column word, up to 2.5% of the width each way."""
+    return (_stable_unit(line_key, "x", index) - 0.5) * width * 0.05
