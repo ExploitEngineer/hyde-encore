@@ -19,6 +19,7 @@ from urllib.parse import unquote, urlencode, urlparse
 from .config import EncoreConfig
 from .lrc import parse_lrc
 from .model import Line, Lyrics, Word
+from .words import join_words
 
 log = logging.getLogger("encore")
 
@@ -221,7 +222,7 @@ def _parse_spicy(data) -> Lyrics:
             words = _syllables_to_words(lead.get("Syllables", []))
             start = float(lead.get("StartTime", words[0].start if words else 0.0))
             end = float(lead.get("EndTime", words[-1].end if words else start))
-            spans.append((start, end, " ".join(w.text for w in words), words))
+            spans.append((start, end, join_words([w.text for w in words]), words))
         return Lyrics(_close_lines(spans), "word", source, credit)
     if kind == "Line":
         spans = [

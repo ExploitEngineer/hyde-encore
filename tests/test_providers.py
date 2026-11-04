@@ -154,6 +154,21 @@ def test_spicy_syllable_to_words():
     assert lyr.credit == "Lyrics by uploader1, synced by maker2 on Spicy Lyrics"
 
 
+def test_spicy_cjk_line_text():
+    syllables = [
+        {"Text": "夜", "StartTime": 1.0, "EndTime": 1.3, "IsPartOfWord": False},
+        {"Text": "に", "StartTime": 1.3, "EndTime": 1.6, "IsPartOfWord": False},
+    ]
+    body = {
+        "Type": "Syllable",
+        "Content": [{"Lead": {"StartTime": 1.0, "EndTime": 1.6, "Syllables": syllables}}],
+    }
+    fetch = FakeFetch({f"/v1/lyrics/{SPOTIFY_ID}": json.dumps(body).encode()})
+    line = spicy(track(), "k", fetch).lines[0]
+    assert line.text == "夜に"
+    assert [w.text for w in line.words] == ["夜", "に"]
+
+
 def test_spicy_line_type():
     fetch = FakeFetch({f"/v1/lyrics/{SPOTIFY_ID}": fixture("spicy_line.json")})
     lyr = spicy(track(), "k", fetch)
