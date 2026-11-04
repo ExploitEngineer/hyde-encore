@@ -10,6 +10,7 @@ animation, thickness, glow, override colors, display).
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 import cairo
@@ -19,9 +20,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 
+from encorelib.colors import scheme as color_scheme
 from encorelib.look import MAX_SIZE, MIN_SIZE, read_look, update_look
 from encorelib.lyricview import lyric_row, lyric_rows
-from encorelib.palette import pick_accent
+from encorelib.palette import wallpaper_palette
 from encorelib.protocol import read_state
 from encorelib.single import claim, pid_alive, read_pid, release
 from encorelib.stream import STYLES
@@ -229,6 +231,13 @@ class Player(Gtk.ApplicationWindow):
         self.state: dict = {}
         self.art_path = ""
         self.accent = (0.55, 0.35, 0.45)
+        self.palette: dict | None = None
+        self.colors = color_scheme({}, wallpaper_palette())
+        self.accent_css = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), self.accent_css, Gtk.STYLE_PROVIDER_PRIORITY_USER + 1
+        )
+        self._apply_accent_css()
         self.expanded = 0.0  # 0..1 art hover expansion
         self.expand_target = 0.0
         self.expand_timer = 0
@@ -775,7 +784,13 @@ class Player(Gtk.ApplicationWindow):
             self.art_path = art
             for view in (self.art, self.art_small):
                 view.set_art(art)
-            self.accent = _hex_rgb(pick_accent(state.get("palette") or {}))
+        palette = state.get("palette") or {}
+        if palette != self.palette:
+            # the lyrics, glow and player share one scheme
+            self.palette = palette
+            self.colors = color_scheme(palette, wallpaper_palette())
+            self.accent = _hex_rgb(self.colors.accent)
+            self._apply_accent_css()
             self.backdrop.queue_draw()
         self._sync_lyrics(state)
         return True
@@ -861,6 +876,9 @@ class Player(Gtk.ApplicationWindow):
             return False
         return True
 
+    def _apply_accent_css(self) -> None:
+        self.accent_css.load_from_string(_accent_rules(self.colors))
+
     def _draw_backdrop(self, _area, cr, width, height) -> None:
         cr.set_source_rgb(0.094, 0.090, 0.102)
         cr.paint()
@@ -902,11 +920,10 @@ class Player(Gtk.ApplicationWindow):
         self._syncing = True
         try:
             self.size_scale.set_value(look.get("size", 30))
-            palette = self.state.get("palette") or {}
             defaults = {
-                "lyric_color": "#" + palette.get("1xa7", "F2A7C3"),
-                "highlight_color": "#" + pick_accent(palette),
-                "secondary_color": "#" + palette.get("2xa6", "A87C9A"),
+                "lyric_color": "#" + self.colors.lyric,
+                "highlight_color": "#" + self.colors.highlight,
+                "secondary_color": "#" + self.colors.secondary,
             }
             for key, button in self.color_buttons.items():
                 rgba = Gdk.RGBA()
@@ -934,16 +951,28 @@ class Player(Gtk.ApplicationWindow):
             self._syncing = False
 
 
+# the window class Hyprland rules match; tests/e2e/stage.py swaps it so a
+# window rule can send its copy to the hidden monitor
+APP_ID = os.environ.get("ENCORE_PLAYER_APP_ID", "org.hyde.encore.player")
+
+
+def _accent_rules(colors) -> str:
+    """The few rules that follow the album: active pill, sliders, switches, menu hover."""
+    a, h, on = colors.accent, colors.highlight, colors.on_highlight
+    return (
+        f"button.pill.on {{ color: #{a}; background: alpha(#{a}, 0.14); }}\n"
+        f"scale highlight {{ background: #{a}; }}\n"
+        f"switch:checked {{ background: #{h}; }}\n"
+        f"button.item:hover {{ background: #{h}; color: #{on}; }}\n"
+    )
+
+
 def run_player(runtime_dir: str, pidfile: str, start: str = "player") -> int:
     if not claim(pidfile):
-        subprocess.run(
-            ["hyprctl", "dispatch", "focuswindow", "class:^org\\.hyde\\.encore\\.player$"],
-            check=False,
-        )
+        pattern = "^" + APP_ID.replace(".", "\\.") + "$"
+        subprocess.run(["hyprctl", "dispatch", "focuswindow", f"class:{pattern}"], check=False)
         return 0
-    app = Gtk.Application(
-        application_id="org.hyde.encore.player", flags=Gio.ApplicationFlags.NON_UNIQUE
-    )
+    app = Gtk.Application(application_id=APP_ID, flags=Gio.ApplicationFlags.NON_UNIQUE)
 
     def on_activate(application):
         provider = Gtk.CssProvider()

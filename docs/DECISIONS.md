@@ -53,6 +53,7 @@ Stack and constellation redraw on word boundaries plus 160 ms pops only.
 Circling comets need continuous repaint; four strip windows at 20 fps cost 23% of a core (CPU raster) and still 9-12% after downscaling, because GTK's per-window frame overhead dominated.
 One click-through window composes all four edges into a 1/4-resolution frame texture that GSK stretches on the GPU: 2.5% of a core at 20 fps, compositor +1%.
 The tick later dropped to 80 ms (12.5 fps), which reads smooth for slow comets.
+Correction (2026-11-04, layer 3): the 2.5% was measured while every paint raised (undefined helpers), so nothing was drawn; drawing for real costs 6.1-7.5% of a core playing on the hidden stage.
 Kept from #13: own process toggled by `hyde-shell encore glow`, cava attack/release envelope when `cava.sock` exists, else a slow breathe.
 
 ## 15. 2026-11-04 - Settings window and sound-setup profiles - Superseded by #16
@@ -93,3 +94,17 @@ Playerctl exposes no `Rate`, so the daemon keeps a `Gio.DBusProxy` on `org.mpris
 ## 23. 2026-11-04 - End-to-end tests run on a private bus and runtime dir - Active
 `tests/e2e/harness.py` starts a private `dbus-daemon`, a short runtime dir under `/run/user/$UID` (AF_UNIX paths cap at 108 bytes), private cache, state and lyrics dirs, fake players and the repo daemon; tests read `encore.sock` without importing `gi`.
 They run in the default pytest invocation, never start GUI processes and never touch the owner's players or runtime files; `tests/e2e/measure.py` uses the same harness for every perf claim.
+
+## 24. 2026-11-04 - One album color scheme for every surface - Active
+`encorelib/colors.py` derives accent, second hue, highlight block, text on the block, resting lyric and secondary colors once per palette; overlay, glow, player and lock screen all use it.
+The first wallbash family with real color (HLS saturation >= 0.22) drives the accent, lightened along its hue until it reads on dark; a grey cover hands over to the HyDE theme's wallpaper palette, and only then a curated violet (`B48CFF`).
+Text on the highlight block is white or ink by contrast: a black-and-white cover used to give a white block under white text.
+
+## 25. 2026-11-04 - Visual work is judged on a hidden Hyprland monitor - Active
+Hyprland has no headless mode, and running nested opens a visible window, so `tests/e2e/stage.py` adds a virtual monitor `encore-lab` to the live session, parks it at 20000,20000 out of the mouse's reach, runs the real surfaces there on the private harness and captures them with `grim -o encore-lab`; the monitor is removed afterwards.
+The player reaches it through a window rule for a stage-only app id and is killed at once if it ever maps on the owner's screen; the harness pins `WAYLAND_DISPLAY` and drops `DISPLAY` so GTK can never fall back to an X11 window there.
+
+## 26. 2026-11-04 - Overlay type and motion are paid for with cheaper rasters, not a GPU renderer - Active
+The redesigned line type (about 4% of the screen height), soft shadow and accent bloom are baked once per line: the shadow comes from shifted blits of a glyph mask shared by the dim and lit copies, and the lit copy is built lazily.
+Frames whose only movement is the idle drift run at 15 fps; pops, slides and exits keep 30.
+The GL, NGL and Vulkan renderers were measured again on these full-screen surfaces and cost 2-3x more than cairo, so #10 stands; the column styles stay over budget on dense lyrics until drawing is limited to the damaged region.

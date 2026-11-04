@@ -107,3 +107,12 @@ type = "string"
 default = ""
 description = "Color of words not yet sung, e.g. \"#FFFFFF80\". Empty uses the album text color at 50%."
 type = "string"
+
+[properties.encore.properties.glow]
+description = "Screen-edge glow ('hyde-shell encore glow')."
+type = "object"
+
+[properties.encore.properties.glow.properties.monitor]
+default = ""
+description = "Monitor connector to glow on, e.g. \"eDP-1\". Empty follows the compositor."
+type = "string"

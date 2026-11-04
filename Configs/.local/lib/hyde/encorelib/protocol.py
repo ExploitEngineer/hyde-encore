@@ -12,8 +12,9 @@ import socket
 from pathlib import Path
 
 from .clock import PlaybackClock
+from .colors import scheme
 from .model import Lyrics
-from .palette import pick_accent
+from .palette import wallpaper_palette
 from .providers import TrackInfo, track_key
 from .timing import Cursor, locate
 from .words import split_words, word_spans
@@ -199,13 +200,19 @@ def read_state(path: Path, timeout: float = 0.3) -> dict | None:
 DIM_ALPHA = "66"  # unsung words at 40% opacity
 
 
-def hyprlock_colors(cfg, palette: dict[str, str]) -> tuple[str, str]:
+def hyprlock_colors(
+    cfg, palette: dict[str, str], theme: dict[str, str] | None = None
+) -> tuple[str, str]:
     """(sung, unsung) colors for the hyprlock line.
 
-    Config wins. Otherwise sung words take the most vivid palette accent that
-    is readable on the dark lock screen, and unsung words are soft white.
+    Config wins. Otherwise sung words take the album scheme's accent (the
+    same as the overlay and glow: grey covers fall back to the theme), and
+    unsung words are soft white.
     """
-    accent = cfg.hyprlock_color or "#" + pick_accent(palette)
+    if cfg.hyprlock_color:
+        accent = cfg.hyprlock_color
+    else:
+        accent = "#" + scheme(palette, wallpaper_palette() if theme is None else theme).accent
     dim = cfg.hyprlock_dim or "#FFFFFF" + DIM_ALPHA
     return accent, dim
 

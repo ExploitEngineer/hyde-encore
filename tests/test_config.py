@@ -147,3 +147,9 @@ def test_overlay_style_accepts_every_style(tmp_path):
         assert load_config(env=env, env_file=tmp_path / "x").overlay_style == style
     env = {**HOME, "ENCORE_OVERLAY_STYLE": "nope"}
     assert load_config(env=env, env_file=tmp_path / "x").overlay_style == "line"
+
+
+def test_glow_monitor(tmp_path):
+    assert load_config(env=HOME, env_file=tmp_path / "x").glow_monitor == ""
+    env = {**HOME, "ENCORE_GLOW_MONITOR": "HDMI-A-1"}
+    assert load_config(env=env, env_file=tmp_path / "x").glow_monitor == "HDMI-A-1"
