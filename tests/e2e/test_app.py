@@ -182,8 +182,13 @@ def test_app_reflects_running_surfaces(lab):
 
 
 def test_quit_stops_overlay_and_glow(lab):
-    start_surface(lab, "overlay")
-    start_surface(lab, "glow")
+    from encorelib.look import read_look
+
+    # through the CLI, as a keybind would: the look records both as on
+    run_cli(lab, "toggle")
+    run_cli(lab, "glow")
+    for name in ("overlay", "glow"):
+        lab.wait_until(lambda n=name: surface_alive(lab, n), f"{name} to start", 10)
     _box, app = open_app(lab, lab.lab, "full")
     assert (lab.run / "hyde" / "encore.stage").exists()
     close_window(lab)
@@ -194,3 +199,18 @@ def test_quit_stops_overlay_and_glow(lab):
     lab.wait_until(lambda: not surface_alive(lab, "glow"), "the glow to stop", 10)
     assert not (lab.run / "hyde" / "encore.stage").exists()
     assert lab.state() is not None  # the engine keeps running for the lock screen
+    kept = read_look(lab.tmp / "state" / "hyde" / "encore.look")
+    assert kept.get("desktop_lyrics_on") is False and kept.get("glow_on") is False
+
+
+def run_cli(h: Harness, *args: str) -> None:
+    import subprocess
+
+    subprocess.run(
+        [sys.executable, str(LIB / "encore.py"), *args],
+        env=h.env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )

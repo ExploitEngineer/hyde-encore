@@ -24,6 +24,8 @@ from gi.repository import Gtk4LayerShell as LayerShell
 from encoregui.lyrics import LyricsEngine
 from encoregui.outputs import find_monitor, place_on
 from encorelib.config import EncoreConfig
+from encorelib.single import pid_alive
+from encorelib.stageflag import covers
 
 STAGE_FLAG = "encore.stage"  # written by the app while its full screen is up
 
@@ -111,13 +113,11 @@ class DesktopOverlay:
         """True while the app's full screen is up on this overlay's output."""
         try:
             with open(self.stage_path, encoding="utf-8") as f:
-                where = f.read().strip()
+                text = f.read()
         except OSError:
             return False
-        if not where:
-            return False
         mine = self.cfg.overlay_monitor or (self.monitor.get_connector() if self.monitor else "")
-        return where == "*" or not mine or where == mine
+        return covers(text, mine, pid_alive)  # a crashed app never keeps us hidden
 
     def _on_runtime_file(self, name: str) -> None:
         if name != STAGE_FLAG:

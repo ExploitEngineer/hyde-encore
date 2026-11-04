@@ -28,6 +28,7 @@ from encoregui.popovers import build_look_menu
 from encoregui.ui import icon_button
 from encorelib.look import read_look
 from encorelib.screen import screen_state
+from encorelib.stageflag import render as render_flag
 from encorelib.stream import STYLES
 
 STAGE_FLAG = "encore.stage"
@@ -251,7 +252,7 @@ class FullPage(Gtk.Overlay):
     def _write_flag(self, connector: str) -> None:
         try:
             with open(self.stage_path, "w", encoding="utf-8") as f:
-                f.write(connector + "\n")
+                f.write(render_flag(connector, os.getpid()))
         except OSError:
             pass
 

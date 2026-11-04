@@ -176,3 +176,11 @@ def test_effective_players():
     assert effective_players(cfg, {}) == ("spotify",)
     assert effective_players(cfg, {"players": ["brave"]}) == ("brave",)
     assert effective_players(cfg, {"players": []}) == ()  # the app's "follow every player"
+
+
+def test_effective_autostart_lets_the_app_override_config():
+    from encorelib.look import effective_autostart
+
+    assert effective_autostart(EncoreConfig(enable=True), {}) is True
+    assert effective_autostart(EncoreConfig(enable=True), {"autostart": False}) is False
+    assert effective_autostart(EncoreConfig(enable=False), {"autostart": True}) is True

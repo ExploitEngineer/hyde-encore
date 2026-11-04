@@ -32,6 +32,11 @@ _SPOTIFY = re.compile(
 )
 _APPLE_KIND = re.compile(r"\s+-\s+(?:single|ep)$", re.IGNORECASE)
 _APPLE_THUMB = re.compile(r"/\d+x\d+bb\.(jpg|png|webp)$")
+# versions with their own cover: a live album, a remix, an acoustic take
+_VARIANT = re.compile(
+    r"\b(live|remix(?:es|ed)?|acoustic|instrumental|karaoke|unplugged|demo|sped up|slowed)\b",
+    re.IGNORECASE,
+)
 # JPEG start-of-frame markers carry the size; C4, C8 and CC are other tables
 _SOF = frozenset(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
 
@@ -74,13 +79,18 @@ def _name(text: str) -> str:
     return " ".join(clean_title(_APPLE_KIND.sub("", text)).lower().split())
 
 
+def _variant(text: str) -> frozenset[str]:
+    """The version words in a title that change which cover is right."""
+    return frozenset(m.lower() for m in _VARIANT.findall(text))
+
+
 def _artist(text: str) -> str:
     return " ".join(primary_artist(text).lower().split())
 
 
 def apple_search_url(artist: str, album: str, title: str) -> str | None:
     """The iTunes Search query for this cover, or None without enough to match."""
-    name = clean_title(album or title).strip()
+    name = clean_title(album.strip() or title).strip()
     who = primary_artist(artist).strip()
     if not who or not name:
         return None
@@ -92,7 +102,8 @@ def apple_search_url(artist: str, album: str, title: str) -> str | None:
 def apple_pick(results: list[dict], artist: str, album: str, title: str) -> str | None:
     """The artwork URL of the result whose artist and album (or, without an
     album, song title) both match, at APPLE_SIZE."""
-    want_artist, want_name = _artist(artist), _name(album or title)
+    wanted = album.strip() or title
+    want_artist, want_name = _artist(artist), _name(wanted)
     if not want_artist or not want_name:
         return None
     field = "collectionName" if album.strip() else "trackName"
@@ -104,8 +115,9 @@ def apple_pick(results: list[dict], artist: str, album: str, title: str) -> str 
             continue
         if _artist(str(record.get("artistName", ""))) != want_artist:
             continue
-        if _name(str(record.get(field, ""))) != want_name:
-            continue
+        found = str(record.get(field, ""))
+        if _name(found) != want_name or _variant(found) != _variant(wanted):
+            continue  # "Hello (Live)" must not take the studio album's cover
         return _APPLE_THUMB.sub(rf"/{APPLE_SIZE}x{APPLE_SIZE}bb.\1", art)
     return None
 

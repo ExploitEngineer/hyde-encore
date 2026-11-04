@@ -134,6 +134,11 @@ def state_look_path(env: Mapping[str, str] | None = None) -> Path:
     return state / "hyde" / "encore.look"
 
 
+def effective_autostart(cfg: EncoreConfig, look: dict) -> bool:
+    """Start the engine at login: the app's switch when set, else config's enable."""
+    return bool(look.get("autostart", cfg.enable))
+
+
 def effective_players(cfg: EncoreConfig, look: dict) -> tuple[str, ...]:
     """The players to follow: the app's list when set (empty: every player), else config."""
     if "players" in look:

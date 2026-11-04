@@ -114,6 +114,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
         root.append(self.toolbar)
 
         key = Gtk.EventControllerKey()
+        # capture phase: Space pauses even when a just-clicked button has focus
+        key.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key.connect("key-pressed", self._on_key)
         self.add_controller(key)
         self._poll()
@@ -345,6 +347,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
         """Quit Encore: the desktop lyrics and the glow stop with the window."""
         self.tray.stop()
         self.full.shutdown()
+        # Quit means off: the next engine start must not bring them back
+        update_look(self.look_path, persist=self.look_state, desktop_lyrics_on=False, glow_on=False)
         for name in ("encore-overlay.pid", "encore-glow.pid"):
             pid = read_pid(Path(self.runtime_dir) / name)
             if pid is not None and pid_alive(pid):

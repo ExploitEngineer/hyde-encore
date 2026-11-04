@@ -18,7 +18,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gtk
 
 from encoregui.ui import rgba_hex
-from encorelib.look import MAX_SIZE, MIN_SIZE, read_look
+from encorelib.look import MAX_SIZE, MIN_SIZE, effective_autostart, effective_players, read_look
 from encorelib.session import player_label
 from encorelib.stream import STYLES
 
@@ -358,7 +358,7 @@ class SettingsPanel:
             self.follow_box.remove(child)
             child = nxt
         self.follow_checks = {}
-        chosen = set(look.get("players") or [])
+        chosen = set(effective_players(self.win.cfg, look))
         present = [p.split(".", 1)[0] for p in self.win.state.get("players") or []]
         names = []
         for name in [*present, *chosen]:
@@ -420,7 +420,7 @@ class SettingsPanel:
                 _set_rgba(button, look.get(key) or default)
             self.lock.set_active(self.win.lock_on)
             self.hd.set_active(look.get("hd_covers", self.win.cfg.hd_covers))
-            self.autostart.set_active(look.get("autostart", False))
+            self.autostart.set_active(effective_autostart(self.win.cfg, look))
             self._fill_follow(look)
         finally:
             self.syncing = False

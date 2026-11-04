@@ -39,7 +39,14 @@ from encorelib.clock import PlaybackClock, clean_rate
 from encorelib.config import EncoreConfig, load_config
 from encorelib.jobs import LatestJobs
 from encorelib.journal import append_capped, read_lines
-from encorelib.look import effective_players, read_look, restore_look, state_look_path, update_look
+from encorelib.look import (
+    effective_autostart,
+    effective_players,
+    read_look,
+    restore_look,
+    state_look_path,
+    update_look,
+)
 from encorelib.lookup import lookup_lyrics
 from encorelib.palette import album_palette, cover_png, fetch_art, wallpaper_palette
 from encorelib.protocol import (
@@ -878,7 +885,7 @@ def run_daemon(if_enabled: bool) -> int:
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING, format="encore: %(message)s")
     cfg = load_config()
     look = read_look(LOOK_PATH)
-    if if_enabled and not (cfg.enable or look.get("autostart")):
+    if if_enabled and not effective_autostart(cfg, look):
         return 0
     server = StateServer(SOCKET_PATH)
     try:

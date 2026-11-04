@@ -294,3 +294,20 @@ def test_lookup_done_without_lyrics(harness):
 
 def test_lookup_done_with_lyrics(playing):
     assert playing.state()["lookup"] == "done"
+
+
+def test_if_enabled_app_switch_overrides_config(harness):
+    state_look = harness.tmp / "state" / "hyde" / "encore.look"
+    state_look.parent.mkdir(parents=True, exist_ok=True)
+    state_look.write_text('{"autostart": false}')
+    harness.env["ENCORE_ENABLE"] = "true"
+    out = subprocess.run(
+        [sys.executable, str(LIB / "encore.py"), "daemon", "--if-enabled"],
+        env=harness.env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert out.returncode == 0
+    assert harness.state() is None

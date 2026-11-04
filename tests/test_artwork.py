@@ -341,3 +341,27 @@ def test_hd_art_splits_artist_from_video_title(tmp_path):
     assert path is not None and path.read_bytes() == big
     searches = [u for u in web.calls if u.startswith("https://itunes.apple.com/search")]
     assert len(searches) == 2  # the literal query, then the split; no duplicate queries
+
+
+def test_pick_rejects_a_live_version_for_the_studio_album():
+    results = json.loads(apple_results(("Adele", "25")))["results"]
+    assert apple_pick(results, "Adele", "25 (Live)", "") is None
+    results = json.loads(apple_songs(("Adele", "25", "Hello")))["results"]
+    assert apple_pick(results, "Adele", "", "Hello (Live)") is None
+    assert apple_pick(results, "Adele", "", "Hello - Remix") is None
+
+
+def test_pick_accepts_matching_qualifiers():
+    results = json.loads(apple_results(("Adele", "25 (Live)")))["results"]
+    assert apple_pick(results, "Adele", "25 (Live)", "") == f"{APPLE_ART}/2000x2000bb.jpg"
+    results = json.loads(
+        apple_results(("Rick Astley", "Whenever You Need Somebody (2022 Remaster)"))
+    )["results"]
+    assert apple_pick(results, "Rick Astley", "Whenever You Need Somebody", "") is not None
+
+
+def test_blank_album_searches_by_song():
+    url = apple_search_url("Adele", "  ", "Hello")
+    assert url is not None and "entity=song" in url
+    results = json.loads(apple_songs(("Adele", "25", "Hello")))["results"]
+    assert apple_pick(results, "Adele", "  ", "Hello") == f"{APPLE_ART}/2000x2000bb.jpg"
