@@ -73,9 +73,18 @@ class Harness:
     # lifecycle ---------------------------------------------------------------
 
     def __enter__(self) -> Self:
+        try:
+            self._setup()
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+        return self
+
+    def _setup(self) -> None:
         self.bus = subprocess.Popen(
             ["dbus-daemon", "--session", "--nofork", "--print-address=1"],
             stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
         )
         address = self.bus.stdout.readline().strip()
@@ -85,7 +94,7 @@ class Harness:
         base = Path(f"/run/user/{os.getuid()}")
         self.run = Path(tempfile.mkdtemp(prefix="enc-", dir=base if base.is_dir() else None))
         for name in ("cache", "state", "lyrics", "logs"):
-            (self.tmp / name).mkdir(exist_ok=True)
+            (self.tmp / name).mkdir(parents=True, exist_ok=True)
         env = {k: v for k, v in os.environ.items() if not k.startswith("ENCORE_")}
         env.update(
             DBUS_SESSION_BUS_ADDRESS=address,
@@ -98,7 +107,6 @@ class Harness:
             SPICY_LYRICS_SECRET_KEY="",
         )
         self.env = env
-        return self
 
     def __exit__(self, *_exc) -> None:
         for process in reversed(self.children):

@@ -29,3 +29,24 @@ def test_harness_cleans_up(tmp_path):
         run_dir = h.run
     assert all(p.poll() is not None for p in children)
     assert not run_dir.exists()
+
+
+def test_harness_creates_missing_base_dirs(tmp_path):
+    from harness import Harness
+
+    with Harness(tmp_path / "not" / "yet") as h:
+        assert (tmp_path / "not" / "yet" / "lyrics").is_dir()
+        assert h.run.is_dir()
+
+
+def test_failed_setup_stops_the_bus(tmp_path, monkeypatch):
+    import harness as module
+
+    def boom(**_kw):
+        raise OSError("no runtime dir")
+
+    monkeypatch.setattr(module.tempfile, "mkdtemp", boom)
+    h = module.Harness(tmp_path)
+    with pytest.raises(OSError):
+        h.__enter__()
+    assert h.bus.poll() is not None
