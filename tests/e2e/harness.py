@@ -116,6 +116,7 @@ class Harness:
             XDG_STATE_HOME=str(self.tmp / "state"),
             ENCORE_LYRICS_DIRS=str(self.tmp / "lyrics"),
             ENCORE_LYRICS_LRCLIB="false",  # tests never reach the network
+            ENCORE_HD_COVERS="false",  # no Apple lookups either
             ENCORE_LYRICS_SPICY_KEY="",
             SPICY_LYRICS_SECRET_KEY="",
         )
