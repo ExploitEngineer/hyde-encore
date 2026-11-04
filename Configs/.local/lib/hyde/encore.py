@@ -898,6 +898,7 @@ def run_daemon(if_enabled: bool) -> int:
 
     loop = GLib.MainLoop()
 
+    @guarded(default=True)  # a failed accept must never remove the listener
     def on_client(_fd, _condition) -> bool:
         server.accept()
         return True

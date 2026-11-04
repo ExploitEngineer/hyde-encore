@@ -6,6 +6,7 @@ status is "playing"; ts is time.monotonic(), shared across processes.
 
 from __future__ import annotations
 
+import errno
 import html
 import json
 import socket
@@ -165,10 +166,23 @@ class StateServer:
         self.sock.setblocking(False)
         return self.sock
 
+    def _accept_one(self) -> socket.socket:
+        client, _ = self.sock.accept()
+        return client
+
     def accept(self) -> None:
         try:
-            client, _ = self.sock.accept()
+            client = self._accept_one()
         except BlockingIOError:
+            return
+        except OSError as error:
+            # out of descriptors (EMFILE/ENFILE) or a peer gone before we got to
+            # it: never let it escape the listener's watch. Hung-up pollers go
+            # first; if the table is still full the oldest client makes room,
+            # and the connection waits in the backlog for the next wake
+            self._drop_hung_up()
+            if error.errno in (errno.EMFILE, errno.ENFILE) and self.clients:
+                self.clients.pop(0).close()
             return
         client.setblocking(False)
         self._drop_hung_up()

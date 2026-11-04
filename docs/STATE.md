@@ -49,6 +49,7 @@ Current shape: Encore is an app (DECISIONS #29) with its own identity (#35); the
 
 ## Known facts
 - HyDE's waybar update checker can fill `/run/user/1000` (1.6 GB tmpfs) with `checkupdates_db_*` dirs behind stuck `checkupdates`/`pacman -Sy` processes (seen at 100%, 254 dirs, 2026-11-05; killing the checkers freed it). Encore now survives a full runtime dir (DECISIONS #38); the test harness falls back to /tmp.
+- The daemon's journal since 2026-11-04, read in full: a crash on `EMFILE` while paused (fixed in `16b3228`, the listener now also survives any accept error), one restart refused with `status=200/CHDIR` (the unit is started from `$HOME` since), LRCLIB 503s and a Spicy Lyrics timeout logged once each and fallen through, and the full-tmpfs storm above. Nothing else.
 - Detached surfaces and the app's commands log to `$XDG_CACHE_HOME/hyde/encore/logs/<name>.log` (`overlay.log`, `glow.log`, `app-commands.log`); the daemon logs to the journal under `hyde-Hyprland-encore.service`.
 - GTK 4.24 ignores an opacity node over a repeat node: the grain's strength is baked into its texture.
 - HyDE bugs found (candidate small PRs): `hyprlock.sh find_filepath` does not follow symlinked layouts; `hyprlock.sh fn_mpris` reads the first listed player; `start_up.lua` runs only the `hc.start` keys it names.
