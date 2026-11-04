@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Render encore's real surfaces on a hidden monitor and capture them.
+
+Adds a virtual monitor `encore-lab` to the running Hyprland (parked at
+20000,20000 so the mouse cannot reach it, removed afterwards), runs the
+private harness (fake player, private bus and runtime dir, repo daemon),
+starts the overlay and optionally the glow on that monitor, seeks the fake
+player to each requested position and saves `grim -o encore-lab` stills,
+plus an optional clip. Nothing shows on the owner's screen.
+
+Usage:
+  python3 tests/e2e/stage.py --style stack --at 2.9,5.0,12.4 [--glow] [--clip 6]
+      [--look size=40 --look motion=false] [--ref .reference/site/hero-1.png]
+Output goes to .stage/<style>/ (gitignored).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Self
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from harness import LIB, REPO, Harness, write_png
+
+from encorelib.look import update_look
+
+LAB = "encore-lab"
+ARTIST, TITLE = "Rick Astley", "Never Gonna Give You Up"  # fake_mpris track 1
+# original lyrics, word-timed; glyph triggers and one CJK line on purpose
+LRC = """[00:02.00]<00:02.00>Neon <00:02.45>on <00:02.65>the <00:02.80>city <00:03.30>floor<00:03.90>
+[00:04.20]<00:04.20>I <00:04.35>call <00:04.70>your <00:04.95>name <00:05.40>at <00:05.60>night<00:06.30>
+[00:06.60]<00:06.60>Every <00:07.00>light <00:07.40>is <00:07.55>moving <00:08.10>left<00:08.70>
+[00:09.00]<00:09.00>Hold <00:09.35>the <00:09.50>time <00:09.95>a <00:10.05>little <00:10.50>longer<00:11.30>
+[00:11.60]<00:11.60>夜<00:11.90>に<00:12.15>駆<00:12.40>け<00:12.60>る<00:12.90>
+[00:13.20]<00:13.20>Drive <00:13.60>until <00:14.00>the <00:14.15>stars <00:14.60>fall <00:15.00>down<00:15.80>
+[00:16.20]<00:16.20>And <00:16.40>we <00:16.55>never <00:16.95>say <00:17.25>goodbye<00:18.10>
+"""
+
+
+def hyprctl(*args: str) -> str:
+    return subprocess.run(
+        ["hyprctl", *args], capture_output=True, text=True, check=False, timeout=10
+    ).stdout.strip()
+
+
+class Lab:
+    """A hidden virtual monitor in the running Hyprland session."""
+
+    def __enter__(self) -> Self:
+        if LAB in self.names():
+            hyprctl("output", "remove", LAB)
+        hyprctl("output", "create", "headless", LAB)
+        deadline = time.monotonic() + 5
+        while LAB not in self.names():
+            if time.monotonic() > deadline:
+                raise RuntimeError("Hyprland did not create the lab monitor")
+            time.sleep(0.05)
+        hyprctl(
+            "eval",
+            f'hl.monitor({{output = "{LAB}", mode = "1920x1080@60", '
+            f'position = "20000x20000", scale = 1}})',
+        )
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        hyprctl("output", "remove", LAB)
+
+    @staticmethod
+    def names() -> list[str]:
+        try:
+            return [m["name"] for m in json.loads(hyprctl("monitors", "all", "-j") or "[]")]
+        except ValueError:
+            return []
+
+    @staticmethod
+    def capture(path: Path) -> Path:
+        subprocess.run(["grim", "-o", LAB, str(path)], check=True, timeout=10)
+        return path
+
+
+def default_cover(tmp: Path) -> Path:
+    covers = sorted(
+        (Path.home() / ".cache" / "hyde" / "encore" / "covers").glob("*.png"),
+        key=lambda p: p.stat().st_mtime,
+    )
+    if covers:
+        return Path(shutil.copy(covers[-1], tmp / "cover.png"))
+    return write_png(tmp / "cover.png", 512, (190, 60, 120))
+
+
+def look_value(raw: str):
+    if raw.lower() in ("true", "false"):
+        return raw.lower() == "true"
+    try:
+        return int(raw)
+    except ValueError:
+        return raw
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--style", default="line", help="line, stack, constellation, visual")
+    parser.add_argument("--at", default="2.9,5.0,7.7,12.4,14.4", help="seconds to capture")
+    parser.add_argument("--look", action="append", default=[], help="look key=value")
+    parser.add_argument("--glow", action="store_true", help="also run the edge glow")
+    parser.add_argument("--no-overlay", action="store_true", help="skip the lyrics overlay")
+    parser.add_argument("--clip", type=float, default=0.0, help="record N seconds from 2.0")
+    parser.add_argument("--cover", default="", help="cover image (default: newest cached)")
+    parser.add_argument("--ref", default="", help="reference frame for a side-by-side sheet")
+    parser.add_argument("--out", default="", help="output dir (default .stage/<style>)")
+    args = parser.parse_args()
+
+    out = Path(args.out or REPO / ".stage" / args.style)
+    out.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp, Lab() as lab, Harness(Path(tmp)) as h:
+        # GTK_A11Y=none: the private bus cannot activate the accessibility registry,
+        # which makes GtkApplication registration fail and the surface exit
+        h.env.update(ENCORE_OVERLAY_MONITOR=LAB, ENCORE_GLOW_MONITOR=LAB, GTK_A11Y="none")
+        h.write_lrc(ARTIST, TITLE, LRC)
+        cover = Path(args.cover) if args.cover else default_cover(Path(tmp))
+        h.start_player(art=str(cover))
+        h.start_daemon()
+        h.ctl("encoretest", "play")
+        h.wait(lambda s: s["status"] == "playing" and s["lyrics"] and s["track"]["art"], 15)
+        h.ctl("encoretest", "pause")
+        look = {"style": args.style}
+        for item in args.look:
+            key, _, value = item.partition("=")
+            look[key.replace("-", "_")] = look_value(value)
+        update_look(h.run / "hyde" / "encore.look", **look)
+        if not args.no_overlay:
+            h._spawn(["bash", str(LIB / "encore.sh"), "overlay"], "overlay.log")
+        if args.glow:
+            h._spawn(["bash", str(LIB / "encore.sh"), "glow", "--run"], "glow.log")
+        time.sleep(2.0)  # first frames, fonts and the art layer
+
+        shots = []
+        for at in [float(x) for x in args.at.split(",") if x]:
+            h.ctl("encoretest", "position", str(at))
+            h.wait(lambda s, at=at: abs(s["position"] - at) < 0.05)
+            time.sleep(0.8)  # the overlay finishes its transition
+            shots.append(lab.capture(out / f"{args.style}-{at:05.1f}.png"))
+            print(shots[-1])
+
+        if args.clip:
+            h.ctl("encoretest", "position", "2.0")
+            h.ctl("encoretest", "play")
+            clip = out / f"{args.style}-clip.mp4"
+            rec = subprocess.Popen(
+                ["wf-recorder", "-y", "-o", LAB, "-f", str(clip)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(args.clip)
+            rec.send_signal(signal.SIGINT)
+            rec.wait(10)
+            print(clip)
+
+        logs = out / "logs"
+        shutil.rmtree(logs, ignore_errors=True)
+        shutil.copytree(h.tmp / "logs", logs)
+        for name in ("overlay.log", "glow.log"):
+            text = h.log(name)
+            if "Traceback" in text or "CRITICAL" in text:
+                print(f"--- {name}\n{text[-1500:]}", file=sys.stderr)
+
+    if args.ref and shots:
+        sheet = out / f"{args.style}-vs-ref.png"
+        subprocess.run(
+            ["magick", str(shots[0]), args.ref, "-resize", "x540", "+append", str(sheet)],
+            check=False,
+        )
+        print(sheet)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

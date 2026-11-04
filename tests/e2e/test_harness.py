@@ -99,3 +99,12 @@ def test_sigterm_on_the_test_process_leaves_nothing(tmp_path):
         os.kill(pid, 9)
     assert leftovers == []
     assert not run_dir.exists()
+
+
+def test_gui_children_reach_wayland_and_never_x11(harness):
+    import os
+
+    wayland = harness.env.get("WAYLAND_DISPLAY", "")
+    if os.environ.get("WAYLAND_DISPLAY"):
+        assert wayland.startswith("/") and os.path.exists(wayland)
+    assert "DISPLAY" not in harness.env

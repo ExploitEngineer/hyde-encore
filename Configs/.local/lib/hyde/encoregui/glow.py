@@ -24,6 +24,7 @@ gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
+from encoregui.outputs import place_on
 from encorelib.config import EncoreConfig
 from encorelib.look import read_look
 from encorelib.palette import pick_accent
@@ -150,6 +151,7 @@ class Glow:
             LayerShell.set_anchor(window, edge, True)
         # cover the true screen edge, waybar and corners included
         LayerShell.set_exclusive_zone(window, -1)
+        place_on(window, cfg.glow_monitor)
         display = window.get_display()
         Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
         # a small texture stretched by the GPU: the CPU only rasterises

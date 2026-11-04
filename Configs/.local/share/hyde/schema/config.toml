@@ -32,3 +32,7 @@ style = "line"  # Overlay style: line (karaoke strip), stack (rolling word colum
 [encore.hyprlock]
 color = ""  # Color of sung words, e.g. "#CAAAF0". Empty uses the album accent.
 dim = ""  # Color of words not yet sung, e.g. "#FFFFFF80". Empty uses the album text color at 50%.
+
+# Screen-edge glow ('hyde-shell encore glow').
+[encore.glow]
+monitor = ""  # Monitor connector to glow on, e.g. "eDP-1". Empty follows the compositor.

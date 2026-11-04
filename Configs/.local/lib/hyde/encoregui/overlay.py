@@ -27,6 +27,7 @@ gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Gdk, Gio, GLib, Gtk, Pango, PangoCairo
 from gi.repository import Gtk4LayerShell as LayerShell
 
+from encoregui.outputs import find_monitor, place_on
 from encorelib.config import EncoreConfig
 from encorelib.constellation import chain_words
 from encorelib.glyphs import glyph_for
@@ -218,14 +219,7 @@ class Overlay:
         LayerShell.set_namespace(self.window, "encore")
         LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.NONE)
         self._apply_style_geometry()
-        if cfg.overlay_monitor:
-            display = self.window.get_display()
-            monitors = display.get_monitors()
-            for i in range(monitors.get_n_items()):
-                monitor = monitors.get_item(i)
-                if monitor.get_connector() == cfg.overlay_monitor:
-                    LayerShell.set_monitor(self.window, monitor)
-                    break
+        place_on(self.window, cfg.overlay_monitor)
 
         css = Gtk.CssProvider()
         css.load_from_string("window, window.background { background: transparent; }")
@@ -256,6 +250,7 @@ class Overlay:
         ):
             LayerShell.set_anchor(self.bg_window, edge, True)
         LayerShell.set_exclusive_zone(self.bg_window, -1)
+        place_on(self.bg_window, cfg.overlay_monitor)  # the art sits under the words
         self.bg = Gtk.Picture()
         self.bg.set_content_fit(Gtk.ContentFit.FILL)
         self.bg.set_can_shrink(True)
@@ -302,13 +297,9 @@ class Overlay:
 
     def _size_window(self) -> None:
         display = self.window.get_display()
-        monitor = None
-        monitors = display.get_monitors()
-        for i in range(monitors.get_n_items()):
-            m = monitors.get_item(i)
-            if not self.cfg.overlay_monitor or m.get_connector() == self.cfg.overlay_monitor:
-                monitor = m
-                break
+        monitor = find_monitor(display, self.cfg.overlay_monitor)
+        if monitor is None and display.get_monitors().get_n_items():
+            monitor = display.get_monitors().get_item(0)
         screen_w = monitor.get_geometry().width if monitor else 1920
         screen_h = monitor.get_geometry().height if monitor else 1080
         self.screen_w, self.screen_h = screen_w, screen_h

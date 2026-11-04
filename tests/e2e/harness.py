@@ -101,6 +101,14 @@ class Harness:
         for name in ("cache", "state", "lyrics", "logs"):
             (self.tmp / name).mkdir(parents=True, exist_ok=True)
         env = {k: v for k, v in os.environ.items() if not k.startswith("ENCORE_")}
+        # WAYLAND_DISPLAY is relative to XDG_RUNTIME_DIR, which changes below: pin the
+        # real socket, and drop DISPLAY so GTK fails closed instead of opening an
+        # X11 window on the owner's screen
+        wayland = env.get("WAYLAND_DISPLAY", "")
+        if wayland and not wayland.startswith("/"):
+            real_runtime = env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+            env["WAYLAND_DISPLAY"] = f"{real_runtime}/{wayland}"
+        env.pop("DISPLAY", None)
         env.update(
             DBUS_SESSION_BUS_ADDRESS=address,
             XDG_RUNTIME_DIR=str(self.run),
