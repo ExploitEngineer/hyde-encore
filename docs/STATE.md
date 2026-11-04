@@ -37,7 +37,8 @@ Current shape: Encore is an app (DECISIONS #29); the next project is lyric anima
 - The standalone (non-HyDE) app; built so it stays possible.
 
 ## Next
-- Owner check on the real screen (plan Task 12), then lyric animation polish (timing against the official videos, emoji and glyphs beside words, lyric typefaces).
+- Owner's verdict on the branch (2026-11-05): a base, not the final product; "we have to improve a lot of things". The next project is the look-and-feel pass on Home and Full screen (spacing, type, the bars' glass look, the idle light) and then lyric animation polish (timing against the official videos, emoji and glyphs beside words, lyric typefaces). Start it in a fresh session with a brainstorm from the owner's own list of what is off.
+- Owner check on the real screen is still pending (launcher, Spotify, full screen, tray in waybar, lock preview).
 - Per-frame pipeline cut with a native profiler (owner's OK to install perf or sysprof).
 - Upstream: Discussion, then small PRs (hyprlock.sh symlink and player fixes, start_up.lua hc.start iteration, encore).
 
