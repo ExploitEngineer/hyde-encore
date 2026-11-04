@@ -39,6 +39,7 @@ from encorelib.clock import PlaybackClock, clean_rate
 from encorelib.config import EncoreConfig, load_config
 from encorelib.jobs import LatestJobs
 from encorelib.journal import append_capped, read_lines
+from encorelib.look import effective_players, read_look, restore_look, state_look_path, update_look
 from encorelib.lookup import lookup_lyrics
 from encorelib.palette import album_palette, cover_png, fetch_art, wallpaper_palette
 from encorelib.protocol import (
@@ -69,6 +70,7 @@ HYPRLOCK_PATH = RUNTIME_DIR / "encore.hyprlock"
 TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
 OVERLAY_PIDFILE = RUNTIME_DIR / "encore-overlay.pid"
 LOOK_PATH = RUNTIME_DIR / "encore.look"
+LOOK_STATE = state_look_path()  # the look kept across reboots
 FOLLOW_PATH = RUNTIME_DIR / "encore.follow"  # a player the user picked by hand
 GLOW_PIDFILE = RUNTIME_DIR / "encore-glow.pid"
 LOOKUPS_PATH = RUNTIME_DIR / "encore.lookups"  # the last 50 lyric lookups
@@ -124,7 +126,9 @@ class Encore:
         self.lyrics = None
         self.art: Path | None = None  # the 512 px PNG lock copy
         self.cover: Path | None = None  # the best full-size cover (HD when found)
-        self.hd_covers = cfg.hd_covers
+        self.look = read_look(LOOK_PATH)
+        self.allow = effective_players(cfg, self.look)
+        self.hd_covers = self.look.get("hd_covers", cfg.hd_covers)
         self.palette: dict[str, str] = wallpaper_palette()
         self.theme = wallpaper_palette()  # the HyDE theme, for grey covers
         self.shown_cover: Path | None = None
@@ -143,6 +147,11 @@ class Encore:
             Gio.FileMonitorFlags.NONE, None
         )
         self.follow_monitor.connect("changed", self.on_follow_changed)
+        # the app's settings (followed players, HD covers) apply live
+        self.look_monitor = Gio.File.new_for_path(str(LOOK_PATH)).monitor_file(
+            Gio.FileMonitorFlags.NONE, None
+        )
+        self.look_monitor.connect("changed", self.on_look_changed)
 
         self.manager = Playerctl.PlayerManager()
         self.manager.connect("name-appeared", self.on_name_appeared)
@@ -191,6 +200,15 @@ class Encore:
         self.choose_player()
 
     @guarded()
+    def on_look_changed(self, _monitor, _file, _other, _event) -> None:
+        self.look = read_look(LOOK_PATH)
+        self.hd_covers = self.look.get("hd_covers", self.cfg.hd_covers)
+        allow = effective_players(self.cfg, self.look)
+        if allow != self.allow:
+            self.allow = allow
+            self.choose_player()
+
+    @guarded()
     def on_follow_changed(self, _monitor, _file, _other, _event) -> None:
         pin = read_pin()
         if pin != self.pin:
@@ -205,7 +223,7 @@ class Encore:
         players = {p.props.player_instance: p for p in self.manager.props.players}
         order = order_by_recency(list(players), self.recent)
         name = pick_player(
-            [(inst, self.status_of(players[inst])) for inst in order], self.cfg.players, self.pin
+            [(inst, self.status_of(players[inst])) for inst in order], self.allow, self.pin
         )
         chosen = players.get(name) if name else None
         if chosen is None or not self.is_current(chosen):
@@ -504,15 +522,23 @@ class Encore:
         )
 
 
-def spawn_overlay() -> None:
-    """Start the overlay as its own detached process via encore.sh (LD_PRELOAD)."""
+def _spawn_surface(*args: str) -> None:
+    """Start a surface as its own detached process via encore.sh (LD_PRELOAD)."""
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encore.sh")
     subprocess.Popen(
-        ["bash", script, "overlay"],
+        ["bash", script, *args],
         start_new_session=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+
+
+def spawn_overlay() -> None:
+    _spawn_surface("overlay")
+
+
+def spawn_glow() -> None:
+    _spawn_surface("glow", "--run")
 
 
 def ensure_daemon() -> None:
@@ -552,10 +578,12 @@ def run_toggle() -> int:
     pid = single.read_pid(OVERLAY_PIDFILE)
     if pid is not None and single.pid_alive(pid):
         os.kill(pid, signal.SIGTERM)
+        update_look(LOOK_PATH, persist=LOOK_STATE, desktop_lyrics_on=False)
         print("encore overlay hidden")
         return 0
     ensure_daemon()
     spawn_overlay()
+    update_look(LOOK_PATH, persist=LOOK_STATE, desktop_lyrics_on=True)
     print("encore overlay shown")
     return 0
 
@@ -582,16 +610,12 @@ def run_glow_toggle() -> int:
     pid = single.read_pid(GLOW_PIDFILE)
     if pid is not None and single.pid_alive(pid):
         os.kill(pid, signal.SIGTERM)
+        update_look(LOOK_PATH, persist=LOOK_STATE, glow_on=False)
         print("encore glow off")
         return 0
     ensure_daemon()
-    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encore.sh")
-    subprocess.Popen(
-        ["bash", script, "glow", "--run"],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    spawn_glow()
+    update_look(LOOK_PATH, persist=LOOK_STATE, glow_on=True)
     print("encore glow on")
     return 0
 
@@ -615,7 +639,7 @@ def _ensure(pidfile: Path, command: list[str], want_on: bool) -> None:
 def run_profile(name: str) -> int:
     from encorelib.profiles import PROFILES, apply_profile
 
-    glow = apply_profile(LOOK_PATH, name)
+    glow = apply_profile(LOOK_PATH, name, persist=LOOK_STATE)
     if glow is None:
         print(f"unknown profile {name!r}; one of: {', '.join(PROFILES)}", file=sys.stderr)
         return 1
@@ -674,7 +698,7 @@ def run_style(name: str) -> int:
     if name not in STYLES:
         print(f"unknown style {name!r}; one of: {', '.join(STYLES)}", file=sys.stderr)
         return 1
-    update_look(LOOK_PATH, style=name)
+    update_look(LOOK_PATH, persist=LOOK_STATE, style=name)
     print(name)
     return 0
 
@@ -684,7 +708,14 @@ def run_look(key: str, value: str) -> int:
 
     if key == "reset":
         update_look(
-            LOOK_PATH, style=None, font=None, size=None, color=None, next_line=None, motion=None
+            LOOK_PATH,
+            persist=LOOK_STATE,
+            style=None,
+            font=None,
+            size=None,
+            color=None,
+            next_line=None,
+            motion=None,
         )
         print("look reset to config")
         return 0
@@ -707,7 +738,7 @@ def run_look(key: str, value: str) -> int:
         print("usage: encore look font|size|color|next-line|reset [value]", file=sys.stderr)
         return 1
     before = dict(change)
-    after = update_look(LOOK_PATH, **change)
+    after = update_look(LOOK_PATH, persist=LOOK_STATE, **change)
     for k, v in before.items():
         if v is not None and after.get(k) != v:
             print(f"rejected {k}={v!r}", file=sys.stderr)
@@ -781,11 +812,11 @@ def run_menu() -> int:
             )
             pick = _rofi(families, "font")
             if pick:
-                update_look(LOOK_PATH, font=pick)
+                update_look(LOOK_PATH, persist=LOOK_STATE, font=pick)
         elif row == 5:
             pick = _rofi([str(n) for n in range(18, 58, 4)], "size")
             if pick.isdigit():
-                update_look(LOOK_PATH, size=int(pick))
+                update_look(LOOK_PATH, persist=LOOK_STATE, size=int(pick))
         elif row == 6:
             palette = state.get("palette") or {}
             swatches = ["auto"] + [
@@ -795,9 +826,11 @@ def run_menu() -> int:
             ]
             pick = _rofi(swatches, "color (hex or auto)")
             if pick:
-                update_look(LOOK_PATH, color=None if pick == "auto" else pick.split()[0])
+                update_look(
+                    LOOK_PATH, persist=LOOK_STATE, color=None if pick == "auto" else pick.split()[0]
+                )
         elif row == 7:
-            update_look(LOOK_PATH, motion=not look.get("motion", True))
+            update_look(LOOK_PATH, persist=LOOK_STATE, motion=not look.get("motion", True))
         elif row == 8:
             run_toggle()
         elif row == 9:
@@ -812,6 +845,7 @@ def run_menu() -> int:
         elif row == 11:
             update_look(
                 LOOK_PATH,
+                persist=LOOK_STATE,
                 style=None,
                 font=None,
                 size=None,
@@ -828,7 +862,8 @@ def run_daemon(if_enabled: bool) -> int:
 
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING, format="encore: %(message)s")
     cfg = load_config()
-    if if_enabled and not cfg.enable:
+    look = read_look(LOOK_PATH)
+    if if_enabled and not (cfg.enable or look.get("autostart")):
         return 0
     server = StateServer(SOCKET_PATH)
     try:
@@ -855,8 +890,12 @@ def run_daemon(if_enabled: bool) -> int:
 
     try:
         Encore(cfg, server)
-        if cfg.overlay_enable:
+        # surfaces that were on come back with the service (their own
+        # single-instance claims make this a no-op when they still run)
+        if cfg.overlay_enable or look.get("desktop_lyrics_on"):
             spawn_overlay()
+        if look.get("glow_on"):
+            spawn_glow()
         loop.run()
     finally:
         server.close()
@@ -901,6 +940,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("lookups", help="show the last lyric lookups and what they found")
     sub.add_parser("hyprlock", help="print the current lyric line as Pango markup")
     args = parser.parse_args(argv)
+    # after a reboot the runtime look is gone: every entry point restores it
+    restore_look(LOOK_PATH, LOOK_STATE)
 
     if args.command == "daemon":
         return run_daemon(args.if_enabled)

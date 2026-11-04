@@ -244,3 +244,41 @@ def test_follow_auto_removes_pin(harness):
     assert run_cli(harness, "follow", "auto").returncode == 0
     harness.wait(lambda s: s["player"] == "encoretest")
     assert not (harness.run / "hyde" / "encore.follow").exists()
+
+
+def test_if_enabled_honors_autostart(harness):
+    state_look = harness.tmp / "state" / "hyde" / "encore.look"
+    state_look.parent.mkdir(parents=True, exist_ok=True)
+    state_look.write_text('{"autostart": true}')
+    harness._spawn([sys.executable, str(LIB / "encore.py"), "daemon", "--if-enabled"], "auto.log")
+    harness.wait_until(lambda: harness.state() is not None, "the daemon to answer")
+    # the runtime look is restored from the kept one at start
+    assert (harness.run / "hyde" / "encore.look").read_text() == '{"autostart": true}'
+
+
+def test_if_enabled_stays_off_by_default(harness):
+    out = subprocess.run(
+        [sys.executable, str(LIB / "encore.py"), "daemon", "--if-enabled"],
+        env=harness.env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert out.returncode == 0
+    assert harness.state() is None
+
+
+def test_look_players_filter_applies_live(harness):
+    from encorelib.look import update_look
+
+    harness.start_player("encoretest")
+    harness.start_player("encoretest2")
+    harness.start_daemon()
+    harness.wait(lambda s: len(s.get("players") or []) == 2)
+    harness.ctl("encoretest2", "play")
+    harness.wait(lambda s: s["player"] == "encoretest2")
+    harness.ctl("encoretest", "play")
+    harness.wait(lambda s: s["player"] == "encoretest")
+    update_look(harness.run / "hyde" / "encore.look", players=["encoretest2"])
+    harness.wait(lambda s: s["player"] == "encoretest2")

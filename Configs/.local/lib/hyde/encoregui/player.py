@@ -21,7 +21,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
 
 from encorelib.colors import scheme as color_scheme
-from encorelib.look import MAX_SIZE, MIN_SIZE, read_look, update_look
+from encorelib.look import MAX_SIZE, MIN_SIZE, read_look, state_look_path, update_look
 from encorelib.lyricview import lyric_row, lyric_rows
 from encorelib.palette import wallpaper_palette
 from encorelib.protocol import read_state
@@ -225,6 +225,7 @@ class Player(Gtk.ApplicationWindow):
         super().__init__(application=app, title="encore")
         self.runtime_dir = runtime_dir
         self.look_path = f"{runtime_dir}/encore.look"
+        self.look_state = state_look_path()  # every change is kept for the next boot
         self.sock_path = f"{runtime_dir}/encore.sock"
         self.add_css_class("encore-player")
         self.set_default_size(960, 660)
@@ -651,36 +652,41 @@ class Player(Gtk.ApplicationWindow):
         self._run(["playerctl", *self._player_args(), "position", f"{abs(seconds)}{sign}"])
 
     def _look(self, **changes) -> None:
-        update_look(self.look_path, **changes)
+        update_look(self.look_path, persist=self.look_state, **changes)
         self._sync_menu()
 
     def _on_size(self, scale) -> None:
         if not getattr(self, "_syncing", False):
-            update_look(self.look_path, size=int(scale.get_value()))
+            update_look(self.look_path, persist=self.look_state, size=int(scale.get_value()))
 
     def _on_color(self, key: str, button: Gtk.ColorDialogButton) -> None:
         if getattr(self, "_syncing", False):
             return
-        update_look(self.look_path, **{key: _rgba_hex(button.get_rgba())})
+        update_look(self.look_path, persist=self.look_state, **{key: _rgba_hex(button.get_rgba())})
 
     def _on_gradient(self, dropdown, _pspec) -> None:
         if not getattr(self, "_syncing", False):
-            update_look(self.look_path, glow_colors=dropdown.get_selected() + 1)
+            update_look(
+                self.look_path, persist=self.look_state, glow_colors=dropdown.get_selected() + 1
+            )
 
     def _on_animation(self, dropdown, _pspec) -> None:
         if not getattr(self, "_syncing", False):
             update_look(
                 self.look_path,
+                persist=self.look_state,
                 glow_animation=("music", "breathe", "static")[dropdown.get_selected()],
             )
 
     def _on_glow_scale(self, scale, attr: str) -> None:
         if not getattr(self, "_syncing", False):
-            update_look(self.look_path, **{f"glow_{attr}": int(scale.get_value())})
+            update_look(
+                self.look_path, persist=self.look_state, **{f"glow_{attr}": int(scale.get_value())}
+            )
 
     def _on_override(self, _switch, state) -> bool:
         if not getattr(self, "_syncing", False):
-            update_look(self.look_path, glow_override=bool(state))
+            update_look(self.look_path, persist=self.look_state, glow_override=bool(state))
         return False
 
     def _on_display(self, dropdown, _pspec) -> None:

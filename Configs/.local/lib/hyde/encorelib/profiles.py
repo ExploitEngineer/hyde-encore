@@ -18,12 +18,12 @@ PROFILES: dict[str, dict] = {
 }
 
 
-def apply_profile(look_path: Path, name: str) -> bool | None:
+def apply_profile(look_path: Path, name: str, persist: Path | None = None) -> bool | None:
     """Write the profile's look keys; returns the wanted glow state."""
     profile = PROFILES.get(name)
     if profile is None:
         return None
-    update_look(look_path, **profile["look"])
+    update_look(look_path, persist=persist, **profile["look"])
     return profile["glow"]
 
 
