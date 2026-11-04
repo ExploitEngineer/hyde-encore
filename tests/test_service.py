@@ -77,7 +77,7 @@ def test_ensure_daemon_starts_the_hyde_unit(tmp_path):
     run, spawned = Runner(), []
     state = ensure_daemon(tmp_path / "encore.sock", "Hyprland", run, lambda: spawned.append(1))
     assert state == "started"
-    assert run.calls == [daemon_start_command("Hyprland")]
+    assert run.calls[-1] == daemon_start_command("Hyprland")
     assert spawned == []
 
 
@@ -92,3 +92,22 @@ def test_ensure_daemon_falls_back_without_hyde_shell(tmp_path):
     run = Runner(error=FileNotFoundError("hyde-shell"))
     assert ensure_daemon(tmp_path / "s", "", run, lambda: spawned.append(1)) == "fallback"
     assert spawned == [1]
+
+
+class RecordingRunner(Runner):
+    def __call__(self, command, **kw):
+        self.kwargs = getattr(self, "kwargs", []) + [kw]
+        return super().__call__(command, **kw)
+
+
+def test_ensure_daemon_starts_from_home_and_clears_a_failed_unit(tmp_path):
+    from pathlib import Path
+
+    run = RecordingRunner()
+    assert ensure_daemon(tmp_path / "s", "Hyprland", run, lambda: None) == "started"
+    assert run.calls == [
+        ["systemctl", "--user", "reset-failed", "hyde-Hyprland-encore.service"],
+        daemon_start_command("Hyprland"),
+    ]
+    # app2unit starts units with --same-dir: a cwd that later vanishes breaks restarts
+    assert all(kw.get("cwd") == Path.home() for kw in run.kwargs)

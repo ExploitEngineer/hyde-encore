@@ -64,15 +64,22 @@ def ensure_daemon(
     """
     if daemon_alive(socket_path):
         return "running"
+    # HyDE's app2unit starts units with --same-dir; a working directory that
+    # later disappears makes every restart fail, so always start from home
+    quiet = {
+        "check": False,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "timeout": START_TIMEOUT,
+        "cwd": Path.home(),
+    }
     try:
-        result = run(
-            daemon_start_command(desktop),
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=START_TIMEOUT,
-        )
-        if result.returncode == 0:
+        # a failed unit of the same name blocks a new transient one
+        run(["systemctl", "--user", "reset-failed", daemon_unit(desktop)], **quiet)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        if run(daemon_start_command(desktop), **quiet).returncode == 0:
             return "started"
     except (OSError, subprocess.TimeoutExpired):
         pass
