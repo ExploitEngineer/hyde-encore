@@ -109,3 +109,11 @@ The player reaches it through a window rule for a stage-only app id and is kille
 The redesigned line type (about 4% of the screen height), soft shadow and accent bloom are baked once per line: the shadow comes from shifted blits of a glyph mask shared by the dim and lit copies, and the lit copy is built lazily.
 Frames whose only movement is the idle drift run at 15 fps; pops, slides and exits keep 30.
 The GL, NGL and Vulkan renderers were measured again on these full-screen surfaces and cost 2-3x more than cairo, so #10 stands; the column styles stay over budget on dense lyrics until drawing is limited to the damaged region.
+
+## 27. 2026-11-04 - Column-style cost is CPU rescaling of big type; the way out is GPU texture nodes - Active
+Measured on the hidden stage: with the column's draw function emptied, the same frame rhythm costs 3.4% of a core, so about 13 of stack's ~17 points are painting.
+GTK replays the cairo drawing at render time, so the Python profiler cannot see it; the cost is bilinear rescaling of the big middle word (about 207 px type, ~270k pixels) on every slide frame.
+Shrinking the canvas width to the line's widest word did not help (painting, not canvas area, dominates), and frame-skipping slides gave no measurable gain on a loaded machine.
+A prototype that draws word textures through snapshot texture nodes and lets the renderer scale them cost 20% (NGL) against 70% (cairo) in a worst case of four giant words rescaled every frame; NGL alone carries a high per-frame cost on this NVIDIA setup, so the switch only pays once the whole overlay draws texture nodes.
+Perf numbers need a quiet machine: with a browser video, Hyprland and a build running, runs varied by 3-4 points.
+
