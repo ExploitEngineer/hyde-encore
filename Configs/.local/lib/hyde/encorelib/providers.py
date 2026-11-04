@@ -19,6 +19,7 @@ from urllib.parse import unquote, urlencode, urlparse
 from .config import EncoreConfig
 from .lrc import parse_lrc
 from .model import Line, Lyrics, Word
+from .query import search_variants
 from .words import join_words
 
 log = logging.getLogger("encore")
@@ -124,8 +125,37 @@ def _from_lrclib(record: dict) -> Lyrics | None:
     return None
 
 
+def _lrclib_search(t: TrackInfo, title: str, artist: str, fetch: Fetch) -> Lyrics | None:
+    """Best record of one LRCLIB search whose duration fits the track."""
+    params = {k: v for k, v in (("track_name", title), ("artist_name", artist)) if v}
+    try:
+        results = _json(fetch(f"{LRCLIB_URL}/search?{urlencode(params)}", {}))
+    except NotFound:
+        return None
+    if not isinstance(results, list):
+        raise ProviderError(f"unexpected LRCLIB search result: {type(results).__name__}")
+    best = None
+    for record in results:
+        if not isinstance(record, dict) or not isinstance(record.get("duration"), int | float):
+            continue
+        if t.length > 0 and abs(record["duration"] - t.length) > DURATION_TOLERANCE:
+            continue
+        found = _from_lrclib(record)
+        if _better(found, best):
+            best = found
+            if best.sync == "word":
+                break
+    return best
+
+
 def lrclib(t: TrackInfo, fetch: Fetch = http_get) -> Lyrics | None:
-    if t.album and t.length > 0:
+    """Synced lyrics from LRCLIB, else the best plain or instrumental answer.
+
+    An exact /get (artist, title, album, duration) comes first; then search
+    variants (see query.py) until one gives synced lyrics.
+    """
+    best = None
+    if t.artist and t.album and t.length > 0:
         query = urlencode(
             {
                 "artist_name": t.artist,
@@ -135,27 +165,19 @@ def lrclib(t: TrackInfo, fetch: Fetch = http_get) -> Lyrics | None:
             }
         )
         try:
-            found = _from_lrclib(_json(fetch(f"{LRCLIB_URL}/get?{query}", {})))
+            best = _from_lrclib(_json(fetch(f"{LRCLIB_URL}/get?{query}", {})))
         except NotFound:
-            found = None
-        if found is not None:
-            return found
-    query = urlencode({"track_name": t.title, "artist_name": t.artist})
-    try:
-        results = _json(fetch(f"{LRCLIB_URL}/search?{query}", {}))
-    except NotFound:
-        return None
-    if not isinstance(results, list):
-        raise ProviderError(f"unexpected LRCLIB search result: {type(results).__name__}")
-    for record in results:
-        if not isinstance(record, dict) or not isinstance(record.get("duration"), int | float):
-            continue
-        duration = record["duration"]
-        if t.length <= 0 or abs(duration - t.length) <= DURATION_TOLERANCE:
-            found = _from_lrclib(record)
-            if found is not None:
-                return found
-    return None
+            best = None
+        # an exact match that is synced, or flagged instrumental, is the answer
+        if best is not None and (best.sync != "none" or not best.lines):
+            return best
+    for title, artist in search_variants(t.title, t.artist):
+        found = _lrclib_search(t, title, artist, fetch)
+        if _better(found, best):
+            best = found
+        if best is not None and best.sync != "none":
+            return best
+    return best
 
 
 def _spicy_credit(body: dict) -> str | None:
