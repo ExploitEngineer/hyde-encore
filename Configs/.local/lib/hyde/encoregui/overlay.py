@@ -945,17 +945,45 @@ class Overlay:
 
     def _draw_rolling(self, sc: Scene, width, height, view: View) -> None:
         now = time.monotonic()
+        if self.exit_snapshot is not None:
+            age = now - self.exit_from
+            if age < EXIT_SECONDS:
+                # line change: the finished column rises and fades as one piece
+                eased = 1 - (1 - age / EXIT_SECONDS) ** 3
+                key, texts, old_ix = self.exit_snapshot
+                if old_ix >= 0:
+                    self._draw_column(
+                        sc,
+                        width,
+                        height,
+                        key,
+                        texts,
+                        old_ix,
+                        1.0,
+                        1.0,
+                        now,
+                        dy=-eased * height * 0.16,
+                        fade=1 - eased,
+                    )
+            else:
+                self.exit_snapshot = None
         ix = current_word_index(view)
         if ix < 0:
             return
-        texts = [t for t, _ in view.words]
-        fill = view.words[ix][1]
         slide = 1.0
         if now - self.slide_from < SLIDE_SECONDS:
             p = (now - self.slide_from) / SLIDE_SECONDS
             slide = 1 - (1 - p) ** 3
+        texts = [t for t, _ in view.words]
+        self._draw_column(
+            sc, width, height, view.line_key, texts, ix, view.words[ix][1], slide, now
+        )
+
+    def _draw_column(
+        self, sc: Scene, width, height, line_key, texts, ix, fill, slide, now, dy=0.0, fade=1.0
+    ) -> None:
         lyric, highlight, secondary = self._trio()
-        cy = height * 0.47
+        cy = height * 0.47 + dy
         base = self._column_base(height)
         visual = self.style == "visual"
         alone = ix == 0  # first word of a line sits big in the middle
@@ -965,14 +993,16 @@ class Overlay:
                 target = 1
             slot = target - 1 + slide if (not alone and slide < 1.0) else target
             slot = max(-1.0, min(3.0, slot))
-            alpha = self._lerp_slot(self.SLOT_ALPHA, slot)
+            alpha = self._lerp_slot(self.SLOT_ALPHA, slot) * fade
             if alpha <= 0.01:
                 continue
             scale_rel = self._lerp_slot(self.SLOT_SCALE, slot)
-            # raster at the TARGET slot's size with its tilt baked in; the GPU
-            # scales it during slides, with mipmaps, so big words stay crisp
+            # raster at the largest size the word passes through on its way to
+            # the target slot (tilt baked in): the GPU only ever scales down,
+            # with mipmaps, so slides stay crisp instead of bloating up
             target_slot = max(0, min(2, target))
-            ref_size = max(12, int(base * self.SLOT_SCALE[target_slot]))
+            largest = max(self.SLOT_SCALE[target_slot], self.SLOT_SCALE[target_slot - 1])
+            ref_size = max(12, int(base * largest))
             zoom = max(0.05, (base * scale_rel) / ref_size)
             shear = -0.10 * (target_slot - 1)
             current = i == ix
@@ -987,9 +1017,9 @@ class Overlay:
             else:
                 rgb, dim = lyric, False
             img, w, h = self._word_surface(
-                texts[i], ref_size, rgb, dim, self._word_style(view.line_key, i), shear
+                texts[i], ref_size, rgb, dim, self._word_style(line_key, i), shear
             )
-            cx = width / 2 + self._stagger(view.line_key, i, width)
+            cx = width / 2 + self._stagger(line_key, i, width)
             y = self._slot_y(slot, cy, base)
             if self.motion and (self.state or {}).get("status") == "playing" and current:
                 cx += 2.0 * math.sin(now * 1.3 + i)
