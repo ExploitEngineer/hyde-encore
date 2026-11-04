@@ -10,7 +10,6 @@ stopped hides entirely.
 
 from __future__ import annotations
 
-import colorsys
 import logging
 import math
 import os
@@ -25,10 +24,11 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 from gi.repository import Gtk4LayerShell as LayerShell
 
 from encoregui.outputs import place_on
+from encorelib.colors import scheme as color_scheme
 from encorelib.config import EncoreConfig
 from encorelib.glowfield import comet_strength, edge_mix, falloff_stops, perimeter_u
 from encorelib.look import read_look
-from encorelib.palette import pick_accent
+from encorelib.palette import wallpaper_palette
 from encorelib.stream import LineDecoder
 
 THICKNESS = 130
@@ -45,11 +45,6 @@ EDGES = (
     ("left", LayerShell.Edge.LEFT, (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM)),
     ("right", LayerShell.Edge.RIGHT, (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM)),
 )
-
-
-def _shift_hue(rgb: tuple[float, float, float], amount: float) -> tuple[float, float, float]:
-    h, lightness, sat = colorsys.rgb_to_hls(*rgb)
-    return colorsys.hls_to_rgb((h + amount) % 1.0, lightness, sat)
 
 
 def _hex_rgb(color: str) -> tuple[float, float, float]:
@@ -125,6 +120,7 @@ class Glow:
         self.accent2 = (1.0, 1.0, 1.0)
         self.album_accent = (1.0, 1.0, 1.0)
         self.album_accent2 = (1.0, 1.0, 1.0)
+        self.palette: dict | None = None
         self.look_path = os.path.join(runtime_dir, "encore.look")
         self.look: dict = {}
         self.status = "stopped"
@@ -237,10 +233,13 @@ class Glow:
         for state in self.decoder.feed(line + b"\n"):
             self.status = state.get("status") or "stopped"
             palette = state.get("palette") or {}
-            self.album_accent = _hex_rgb(pick_accent(palette))
-            second = palette.get("3xa8") or palette.get("2xa8") or ""
-            self.album_accent2 = _hex_rgb(second) if second else _shift_hue(self.album_accent, 0.12)
-            self._resolve_colors()
+            if palette != self.palette:
+                # same scheme as the lyrics: grey covers fall back to the theme
+                self.palette = palette
+                colors = color_scheme(palette, wallpaper_palette())
+                self.album_accent = _hex_rgb(colors.accent)
+                self.album_accent2 = _hex_rgb(colors.accent2)
+                self._resolve_colors()
         self._schedule()
 
     def _on_cava_line(self, line: bytes) -> None:
@@ -274,7 +273,7 @@ class Glow:
         if self.status == "playing":
             alpha = BASE_ALPHA + BEAT_ALPHA * self.envelope
         else:
-            alpha = 0.18
+            alpha = 0.28  # paused: a calm, even frame, still clearly there
         return min(1.0, alpha * self.intensity)
 
     def _tick(self) -> bool:
