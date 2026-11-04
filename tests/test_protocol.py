@@ -223,7 +223,10 @@ def test_hyprlock_colors_config_wins_and_fallback():
 
     cfg = EncoreConfig(hyprlock_color="#FF0000", hyprlock_dim="#00FF0080")
     assert hyprlock_colors(cfg, {}) == ("#FF0000", "#00FF0080")
-    assert hyprlock_colors(EncoreConfig(), {}) == ("#FFFFFF", "#FFFFFF66")
+    # no cover and no theme: the curated default accent, never the owner's wallpaper
+    from encorelib.colors import DEFAULT_ACCENT
+
+    assert hyprlock_colors(EncoreConfig(), {}, {}) == ("#" + DEFAULT_ACCENT, "#FFFFFF66")
 
 
 GAPPY = Lyrics(
@@ -281,3 +284,15 @@ def test_build_state_line_text():
 def test_markup_cjk_keeps_spacing():
     out = hyprlock_markup(CJK, Cursor(0, 1, 0.5, 0), "#ff0000", "#888888")
     assert out == '<span foreground="#ff0000">夜に</span><span foreground="#888888">駆ける</span>'
+
+
+def test_hyprlock_colors_follow_the_scheme_for_grey_covers():
+    from encorelib.colors import scheme
+    from encorelib.config import EncoreConfig
+    from encorelib.protocol import hyprlock_colors
+
+    grey = {"1xa8": "D6D6D6", "2xa8": "D6D6D6", "txt1": "FFFFFF"}
+    theme = {"1xa8": "4FB89A"}
+    accent, _dim = hyprlock_colors(EncoreConfig(), grey, theme)
+    assert accent == "#" + scheme(grey, theme).accent
+    assert accent != "#D6D6D6"

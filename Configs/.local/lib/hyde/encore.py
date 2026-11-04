@@ -109,6 +109,7 @@ class Encore:
         self.lyrics = None
         self.art: Path | None = None
         self.palette: dict[str, str] = wallpaper_palette()
+        self.theme = wallpaper_palette()  # the HyDE theme, for grey covers
         self.shown_cover: Path | None = None
         self.tick_id = 0
         self.ticks = 0
@@ -379,7 +380,7 @@ class Encore:
     def publish(self) -> None:
         cursor = locate(self.lyrics, self.clock.position()) if self.lyrics else NO_CURSOR
         self.last_cursor = (cursor.line, cursor.word)
-        accent, dim = hyprlock_colors(self.cfg, self.palette)
+        accent, dim = hyprlock_colors(self.cfg, self.palette, self.theme)
         markup = hyprlock_markup(self.lyrics, cursor, accent, dim) if self.track else ""
         write_atomic(HYPRLOCK_PATH, markup + "\n" if markup else "")
         write_atomic(TRACK_PATH, hyprlock_track(self.track))
