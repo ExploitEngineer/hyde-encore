@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-GAP_HIDE_SECONDS = 4.0
+from .timing import GAP_HOLD_SECONDS
+
+GAP_HIDE_SECONDS = GAP_HOLD_SECONDS
 FILL_FPS_HINT = 60
 
 
@@ -72,7 +74,7 @@ def build_view(state: dict | None, now: float) -> View:
     return View(
         visible=True,
         line_key=f"{track['key']}:{line['index']}",
-        text=" ".join(w["text"] for w in words),
+        text=line.get("text") or " ".join(w["text"] for w in words),
         words=fills,
         next_text=state.get("next") or "",
         animating=animating,

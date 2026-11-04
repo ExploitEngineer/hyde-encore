@@ -166,3 +166,17 @@ def test_next_word_boundary_mid_word_and_between():
     assert next_word_boundary(state(position=13.0 + GAP_HIDE_SECONDS + 1), 1000.0) is None
     assert next_word_boundary(state(status="paused"), 1000.0) is None
     assert next_word_boundary(None, 1000.0) is None
+
+
+def test_build_view_uses_line_text():
+    line = {
+        "index": 0,
+        "start": 10.0,
+        "end": 30.0,
+        "text": "夜に",
+        "words": [
+            {"text": "夜", "start": 10.0, "end": 11.0},
+            {"text": "に", "start": 11.0, "end": 12.0},
+        ],
+    }
+    assert build_view(state(line=line), 1000.0).text == "夜に"

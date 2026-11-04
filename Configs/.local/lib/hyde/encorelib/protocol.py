@@ -16,6 +16,7 @@ from .model import Lyrics
 from .palette import pick_accent
 from .providers import TrackInfo, track_key
 from .timing import Cursor, locate
+from .words import split_words, word_spans
 
 PROTOCOL_VERSION = 1
 
@@ -29,7 +30,7 @@ def build_state(
     palette: dict[str, str],
 ) -> dict:
     position, ts = clock.anchor()
-    line = nxt = None
+    line = nxt = gap = None
     if lyrics is not None and lyrics.sync != "none":
         cursor = locate(lyrics, clock.position())
         if cursor.line >= 0:
@@ -38,11 +39,17 @@ def build_state(
                 "index": cursor.line,
                 "start": ln.start,
                 "end": ln.end,
+                "text": ln.text,
                 "words": [{"text": w.text, "start": w.start, "end": w.end} for w in ln.words],
             }
-        following = cursor.line + 1
-        if following < len(lyrics.lines):
-            nxt = lyrics.lines[following].text
+        upcoming = next(
+            (i for i in range(cursor.after + 1, len(lyrics.lines)) if lyrics.lines[i].text.strip()),
+            None,
+        )
+        if upcoming is not None:
+            nxt = lyrics.lines[upcoming].text
+            if line is None:
+                gap = {"after": cursor.after, "until": lyrics.lines[upcoming].start}
     return {
         "v": PROTOCOL_VERSION,
         "ts": ts,
@@ -75,6 +82,7 @@ def build_state(
         "rate": clock.rate,
         "line": line,
         "next": nxt,
+        "gap": gap,
         "palette": palette,
     }
 
@@ -92,20 +100,23 @@ def hyprlock_markup(lyrics: Lyrics | None, cursor: Cursor, accent: str, dim: str
     if lyrics is None or cursor.line < 0:
         return ""
     line = lyrics.lines[cursor.line]
-    words = [w.text for w in line.words] if line.words else line.text.split()
+    text = line.text.strip()
+    words = [w.text for w in line.words] if line.words else split_words(text)
     if not words:
         return ""
+    # cut the source text after the sung word, so CJK lines keep no spaces
+    cut = word_spans(text, words)[cursor.word][1] if cursor.word >= 0 else 0
+    sung, rest = text[:cut].rstrip(), text[cut:].lstrip()
+    gap = " " if text[cut : cut + 1].isspace() else ""
 
-    def esc(parts: list[str]) -> str:
-        return html.escape(" ".join(parts), quote=False)
+    def esc(part: str) -> str:
+        return html.escape(part, quote=False)
 
-    sung, rest = words[: cursor.word + 1], words[cursor.word + 1 :]
-    out = []
+    if sung and rest:
+        return _span(accent, esc(sung)) + gap + _span(dim, esc(rest))
     if sung:
-        out.append(_span(accent, esc(sung)))
-    if rest:
-        out.append(_span(dim, esc(rest)))
-    return " ".join(out)
+        return _span(accent, esc(sung))
+    return _span(dim, esc(rest))
 
 
 def encode(state: dict) -> bytes:

@@ -14,16 +14,27 @@ from .words import split_words, word_units
 SECONDS_PER_UNIT = 0.08
 LINE_FILL = 0.9
 WORD_WEIGHT_PAD = 2
+# A line stays on screen this long after its last word, then the cursor
+# reports a gap, so an instrumental never shows a stale, fully lit line.
+GAP_HOLD_SECONDS = 4.0
 
 
 @dataclass(frozen=True)
 class Cursor:
+    """Where playback is in the lyrics.
+
+    line is the live line, or -1 in any gap (intro, instrumental, blank
+    line, outro); after is the last line whose start has passed, so a gap
+    still knows where it sits.
+    """
+
     line: int
     word: int
     progress: float
+    after: int = -1
 
 
-NO_CURSOR = Cursor(-1, -1, 0.0)
+NO_CURSOR = Cursor(-1, -1, 0.0, -1)
 
 
 def estimate_words(line: Line) -> Line:
@@ -53,6 +64,13 @@ def with_words(lyrics: Lyrics) -> Lyrics:
     return replace(lyrics, lines=lines)
 
 
+def release_time(line: Line) -> float:
+    """When a line stops being live: its end, or the hold after its last word."""
+    if line.words:
+        return min(line.end, line.words[-1].end + GAP_HOLD_SECONDS)
+    return line.end
+
+
 def locate(lyrics: Lyrics, t: float) -> Cursor:
     """Return the line and word being sung at playback time t (seconds)."""
     if lyrics.sync == "none" or not lyrics.lines:
@@ -61,14 +79,16 @@ def locate(lyrics: Lyrics, t: float) -> Cursor:
     if li < 0:
         return NO_CURSOR
     line = lyrics.lines[li]
-    if t >= line.end or not line.words:
-        return Cursor(li, -1, 0.0)
+    if not line.text.strip() or t >= release_time(line):
+        return Cursor(-1, -1, 0.0, li)
+    if not line.words:
+        return Cursor(li, -1, 0.0, li)
     wi = bisect_right(line.words, t, key=lambda w: w.start) - 1
     if wi < 0:
-        return Cursor(li, -1, 0.0)
+        return Cursor(li, -1, 0.0, li)
     word = line.words[wi]
     if t >= word.end:
-        return Cursor(li, wi, 1.0)
+        return Cursor(li, wi, 1.0, li)
     span = word.end - word.start
     progress = (t - word.start) / span if span > 0 else 1.0
-    return Cursor(li, wi, progress)
+    return Cursor(li, wi, progress, li)

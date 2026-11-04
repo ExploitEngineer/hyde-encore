@@ -3,7 +3,7 @@ import itertools
 import pytest
 
 from encorelib.model import Line, Lyrics, Word
-from encorelib.timing import Cursor, estimate_words, locate, with_words
+from encorelib.timing import GAP_HOLD_SECONDS, Cursor, estimate_words, locate, with_words
 
 
 def _words_contiguous(words):
@@ -80,15 +80,37 @@ def test_locate_in_word():
 
 
 def test_locate_between_words():
-    assert locate(LYR, 11.5) == Cursor(0, 0, 1.0)
+    assert locate(LYR, 11.5) == Cursor(0, 0, 1.0, 0)
 
 
-def test_locate_gap_line():
-    assert locate(LYR, 16.0) == Cursor(1, -1, 0.0)
+def test_locate_blank_line_is_gap():
+    assert locate(LYR, 16.0) == Cursor(-1, -1, 0.0, 1)
 
 
 def test_locate_after_end():
-    assert locate(LYR, 30.0) == Cursor(2, -1, 0.0)
+    assert locate(LYR, 30.0) == Cursor(-1, -1, 0.0, 2)
+
+
+GAPPY = Lyrics(
+    (
+        Line(10.0, 60.0, "one two", (Word("one", 10.0, 11.0), Word("two", 11.0, 12.0))),
+        Line(60.0, 64.0, "three", (Word("three", 60.0, 61.0),)),
+    ),
+    "word",
+    "t",
+)
+
+
+def test_locate_releases_line_after_hold():
+    assert GAP_HOLD_SECONDS == 4.0
+    assert locate(GAPPY, 15.9).line == 0
+    assert locate(GAPPY, 16.1) == Cursor(-1, -1, 0.0, 0)
+    assert locate(GAPPY, 60.5).line == 1
+
+
+def test_locate_seek_back_from_gap():
+    locate(GAPPY, 30.0)
+    assert locate(GAPPY, 11.0) == Cursor(0, 1, 0.0, 0)
 
 
 def test_locate_seek_back():
