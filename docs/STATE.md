@@ -66,4 +66,4 @@ Quality pass runs one layer at a time: 0 docs, 1 engine, 2 daemon, 3 overlay, 4 
 - `hyde-shell encore lrc` saves the current lyrics as a local `.lrc` for offline use and hand-tuning.
 - Waybar module showing the current lyric line from `encore.sock`.
 
-verified: 52300f8 2026-11-04
+verified: f0b082a 2026-11-04
