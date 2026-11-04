@@ -12,10 +12,15 @@ from .providers import Fetch, TrackInfo, find_lyrics, http_get, local_lrc, track
 log = logging.getLogger("encore")
 
 
+# Bump when parsing or lookup changes what a cached answer would hold, so
+# old entries are refetched once (v2: search variants, CJK-aware lines).
+LOOKUP_VERSION = 2
+
+
 def cache_key(t: TrackInfo, cfg: EncoreConfig) -> str:
-    """Track key plus the enabled online sources, so changing sources refetches."""
+    """Track key, enabled online sources and lookup version."""
     sources = ("l" if cfg.lrclib else "") + ("s" if cfg.spicy_key else "")
-    return f"{track_key(t)}-{sources or 'none'}"
+    return f"{track_key(t)}-{sources or 'none'}-v{LOOKUP_VERSION}"
 
 
 def lookup_lyrics(
