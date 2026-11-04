@@ -418,7 +418,8 @@ def ensure_daemon() -> None:
 
 
 def run_overlay_cmd() -> int:
-    os.environ.setdefault("GSK_RENDERER", "cairo")
+    # frames are snapshot render nodes composed on the GPU (DECISIONS #28): GTK's default
+    # renderer, not cairo, which rescaled big type on the CPU every frame
     from encorelib import single
 
     if not single.claim(OVERLAY_PIDFILE):
