@@ -346,6 +346,21 @@ def spawn_overlay() -> None:
     )
 
 
+def ensure_daemon() -> None:
+    """Start the encore service when a surface opens and none is answering."""
+    from encorelib.service import ensure_daemon as ensure
+
+    def run_directly() -> None:
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "daemon"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    ensure(SOCKET_PATH, os.environ.get("XDG_SESSION_DESKTOP", ""), fallback=run_directly)
+
+
 def run_overlay_cmd() -> int:
     os.environ.setdefault("GSK_RENDERER", "cairo")
     from encorelib import single
@@ -369,6 +384,7 @@ def run_toggle() -> int:
         os.kill(pid, signal.SIGTERM)
         print("encore overlay hidden")
         return 0
+    ensure_daemon()
     spawn_overlay()
     print("encore overlay shown")
     return 0
@@ -398,6 +414,7 @@ def run_glow_toggle() -> int:
         os.kill(pid, signal.SIGTERM)
         print("encore glow off")
         return 0
+    ensure_daemon()
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encore.sh")
     subprocess.Popen(
         ["bash", script, "glow", "--run"],
@@ -412,6 +429,7 @@ def run_glow_toggle() -> int:
 def run_player_cmd(start: str = "player") -> int:
     from encoregui.player import run_player
 
+    ensure_daemon()
     return run_player(str(RUNTIME_DIR), str(PLAYER_PIDFILE), start)
 
 

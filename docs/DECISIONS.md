@@ -30,7 +30,7 @@ System `python3` has `python-gobject`, `playerctl` and `gtk4-layer-shell` typeli
 `encore.sh` is the `hyde-shell` entry (hyde-shell prefers `.sh` over `.py`) and execs system `python3 encore.py`.
 `encorelib/` stays free of `gi` and third-party imports so it runs on either interpreter.
 
-## 9. 2026-11-03 - Autostart through HyDE's hc.start / [desktop.start] - Active
+## 9. 2026-11-03 - Autostart through HyDE's hc.start / [desktop.start] - Superseded by #20
 encore starts like HyDE's other services: `hyde-shell app -u hyde-$XDG_SESSION_DESKTOP-encore.service -t service -- encore.sh daemon --if-enabled`.
 The daemon exits at once unless `[encore] enable = true`, so the entry can ship enabled-by-config without starting anything by default.
 
@@ -66,3 +66,8 @@ Kept from #15: the `working` and `show` profiles and the `encore show` workspace
 ## 17. 2026-11-04 - Column styles render for steady 1:1 blits; visual art is its own layer - Active
 Visual cost 85% of a core: words re-typeset at interpolated sizes every frame and big bitmaps went through cairo's convolution filter with skew.
 Words now rasterize per target slot with the drum tilt baked in, steady frames blit 1:1 at integer positions, slides use bilinear, and the album art sits in a separate TOP-layer window that never redraws: visual 11%, stack 9%.
+
+## 20. 2026-11-04 - The daemon starts on demand; login autostart needs a start_up.lua line - Active
+HyDE's `start_up.lua` runs a fixed list of `hc.start` keys in its `hyprland.start` handler and never iterates the table, so `hc.start.encore` and `[desktop.start] encore` were never executed: encore had never autostarted, and after a fresh login every surface stayed empty while Spotify played.
+`toggle`, `glow` and the player now start the daemon when its socket does not answer, as the same `hyde-<desktop>-encore.service` unit (not gated on `enable`, since the user asked for a surface), falling back to a detached `encore.py daemon` when `hyde-shell` or the unit fails.
+Login autostart is a `hl.on("hyprland.start", ...)` line in the user's `hyprland.lua` here, and `check_exec(hs.encore)` in `start_up.lua` in the upstream PR.

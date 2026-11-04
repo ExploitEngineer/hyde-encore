@@ -34,4 +34,4 @@ Goal: match, then beat, the reference apps Verci and Lumn, then upstream PRs to 
 - `Configs/.local/lib/hyde/encoregui/`: GTK4 processes, each separate from the daemon: `overlay.py` (layer-shell lyrics, plus the visual-style art layer), `glow.py` (one full-screen edge-glow window), `player.py` (normal app window `org.hyde.encore.player` with the look menu and glow popover).
 - Runtime dir `$XDG_RUNTIME_DIR/hyde/`: `encore.sock` (state), `encore.look` (live look and glow keys), pidfiles, hyprlock line, track and cover files.
 - State protocol: JSON lines on `encore.sock`, schema in `docs/superpowers/plans/2026-11-03-encore-core.md`.
-- Upstream fragments hold only encore's additions, to merge into HyDE's files: `Configs/.local/share/hyde/schema/*.toml` and `Configs/.local/share/hypr/lua/{variables,key_binds,window_rules}.encore.lua`.
+- Upstream fragments hold only encore's additions, to merge into HyDE's files: `Configs/.local/share/hyde/schema/*.toml` and `Configs/.local/share/hypr/lua/{variables,start_up,key_binds,window_rules}.encore.lua`.
