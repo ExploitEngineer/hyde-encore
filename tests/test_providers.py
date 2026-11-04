@@ -154,6 +154,21 @@ def test_spicy_syllable_to_words():
     assert lyr.credit == "Lyrics by uploader1, synced by maker2 on Spicy Lyrics"
 
 
+def test_spicy_cjk_line_text():
+    syllables = [
+        {"Text": "夜", "StartTime": 1.0, "EndTime": 1.3, "IsPartOfWord": False},
+        {"Text": "に", "StartTime": 1.3, "EndTime": 1.6, "IsPartOfWord": False},
+    ]
+    body = {
+        "Type": "Syllable",
+        "Content": [{"Lead": {"StartTime": 1.0, "EndTime": 1.6, "Syllables": syllables}}],
+    }
+    fetch = FakeFetch({f"/v1/lyrics/{SPOTIFY_ID}": json.dumps(body).encode()})
+    line = spicy(track(), "k", fetch).lines[0]
+    assert line.text == "夜に"
+    assert [w.text for w in line.words] == ["夜", "に"]
+
+
 def test_spicy_line_type():
     fetch = FakeFetch({f"/v1/lyrics/{SPOTIFY_ID}": fixture("spicy_line.json")})
     lyr = spicy(track(), "k", fetch)
@@ -283,3 +298,61 @@ def test_lrclib_search_skips_implausible_candidates():
     good = json.loads(fixture("lrclib_search_real.json"))[0]
     fetch = FakeFetch({"/api/search": json.dumps([junk, good]).encode()})
     assert lrclib(track(album="", length=216.0), fetch).lines[0].text == "line one"
+
+
+class SearchFetch:
+    """LRCLIB stand-in that answers /api/search by (track_name, artist_name)."""
+
+    def __init__(self, answers):
+        self.answers = answers
+        self.urls = []
+
+    def __call__(self, url, headers):
+        self.urls.append(url)
+        parsed = urlparse(url)
+        if parsed.path != "/api/search":
+            raise NotFound(url)
+        q = parse_qs(parsed.query)
+        key = (q.get("track_name", [""])[0], q.get("artist_name", [""])[0])
+        return json.dumps(self.answers.get(key, [])).encode()
+
+
+def synced_record(text="synced line", duration=141.0):
+    lrc = "\n".join(f"[00:{10 + i:02d}.00]{text} {i}" for i in range(5))
+    return {"duration": duration, "instrumental": False, "syncedLyrics": lrc, "plainLyrics": text}
+
+
+def test_lrclib_empty_artist_omits_param():
+    fetch = SearchFetch({})
+    assert lrclib(track(artist="", album="Album", length=141.0), fetch) is None
+    assert fetch.urls
+    assert all("artist_name" not in u and "/api/get" not in u for u in fetch.urls)
+
+
+def test_lrclib_feat_retry():
+    fetch = SearchFetch({("Stay", "The Kid LAROI"): [synced_record("stay")]})
+    t = track(
+        title="Stay (feat. Justin Bieber)",
+        artist="The Kid LAROI, Justin Bieber",
+        album="",
+        length=141.0,
+    )
+    lyr = lrclib(t, fetch)
+    assert lyr.sync == "line"
+    assert lyr.lines[0].text == "stay 0"
+    assert len(fetch.urls) == 2
+
+
+def test_lrclib_prefers_synced_over_earlier_plain():
+    plain = {"duration": 141.0, "instrumental": False, "plainLyrics": "a\nb", "syncedLyrics": None}
+    fetch = SearchFetch({("Song", "Artist"): [plain, synced_record()]})
+    lyr = lrclib(track(title="Song", artist="Artist", album="", length=141.0), fetch)
+    assert lyr.sync == "line"
+
+
+def test_lrclib_falls_back_to_plain_when_nothing_synced():
+    plain = {"duration": 141.0, "instrumental": False, "plainLyrics": "a\nb", "syncedLyrics": None}
+    fetch = SearchFetch({("Song", "Artist"): [plain]})
+    lyr = lrclib(track(title="Song", artist="Artist", album="", length=141.0), fetch)
+    assert lyr.sync == "none"
+    assert [ln.text for ln in lyr.lines] == ["a", "b"]

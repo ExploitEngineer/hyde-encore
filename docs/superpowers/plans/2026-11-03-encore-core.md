@@ -70,12 +70,17 @@ Socket protocol (consumed by Plans 2 and 3, fixed here): one JSON object per lin
  "track": {"key": "...", "title": "...", "artist": "...", "album": "...", "length": 215.3, "art": "/path/cover.png"},
  "lyrics": {"sync": "word", "source": "lrclib", "credit": null, "lines": [{"start": 61.9, "text": "hello world"}]},
  "position": 63.21, "rate": 1.0,
- "line": {"index": 12, "start": 61.9, "end": 65.4, "words": [{"text": "hello", "start": 61.9, "end": 62.3}]},
+ "line": {"index": 12, "start": 61.9, "end": 65.4, "text": "hello world", "words": [{"text": "hello", "start": 61.9, "end": 62.3}]},
  "next": "text of next line",
+ "gap": null,
  "palette": {"pry1": "1E1E2E", "pry4": "...", "txt1": "...", "1xa8": "..."}}
 ```
 
 `ts` is `time.monotonic()` (CLOCK_MONOTONIC, shared across processes), so clients compute the live position as `position + (now - ts) * rate` when `status == "playing"`.
+
+Gaps (added in layer 1, still `v: 1`): a line stops being live 4 s after its last word (`timing.GAP_HOLD_SECONDS`) or at a blank line; then `line` is `null` and `gap` is `{"after": <last started line index, -1 in the intro>, "until": <start of the next non-blank line>}`.
+`gap` is `null` while a line is live (and for unsynced lyrics); in the outro it is `{"after": <last line>, "until": null}`; `next` always names the next non-blank line.
+`line.text` is the source text, so scripts without spaces (Chinese, Japanese) render without inserted spaces; each `words[].text` is a substring of it.
 
 ---
 

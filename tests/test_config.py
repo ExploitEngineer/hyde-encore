@@ -139,3 +139,11 @@ def test_overlay_style(tmp_path):
     assert load_config(env=env, env_file=tmp_path / "x").overlay_style == "constellation"
     env = {**HOME, "ENCORE_OVERLAY_STYLE": "wave"}
     assert load_config(env=env, env_file=tmp_path / "x").overlay_style == "line"
+
+
+def test_overlay_style_accepts_every_style(tmp_path):
+    for style in ("line", "stack", "constellation", "visual"):
+        env = {**HOME, "ENCORE_OVERLAY_STYLE": style}
+        assert load_config(env=env, env_file=tmp_path / "x").overlay_style == style
+    env = {**HOME, "ENCORE_OVERLAY_STYLE": "nope"}
+    assert load_config(env=env, env_file=tmp_path / "x").overlay_style == "line"

@@ -224,3 +224,60 @@ def test_hyprlock_colors_config_wins_and_fallback():
     cfg = EncoreConfig(hyprlock_color="#FF0000", hyprlock_dim="#00FF0080")
     assert hyprlock_colors(cfg, {}) == ("#FF0000", "#00FF0080")
     assert hyprlock_colors(EncoreConfig(), {}) == ("#FFFFFF", "#FFFFFF66")
+
+
+GAPPY = Lyrics(
+    (
+        Line(10.0, 60.0, "one two", (Word("one", 10.0, 11.0), Word("two", 11.0, 12.0))),
+        Line(60.0, 70.0, ""),
+        Line(70.0, 74.0, "three", (Word("three", 70.0, 71.0),)),
+    ),
+    "word",
+    "t",
+)
+
+
+def test_build_state_gap_after_hold():
+    state = build_state("playing", TRACK, None, GAPPY, clock_at(30.0), {})
+    assert state["line"] is None
+    assert state["gap"] == {"after": 0, "until": 70.0}
+    assert state["next"] == "three"
+
+
+def test_build_state_intro_is_gap():
+    state = build_state("playing", TRACK, None, GAPPY, clock_at(2.0), {})
+    assert state["gap"] == {"after": -1, "until": 10.0}
+    assert state["next"] == "one two"
+
+
+def test_build_state_live_line_has_no_gap():
+    state = build_state("playing", TRACK, None, GAPPY, clock_at(10.5), {})
+    assert state["line"]["index"] == 0
+    assert state["gap"] is None
+    assert state["next"] == "three"
+
+
+def test_build_state_outro_gap_has_no_until():
+    state = build_state("playing", TRACK, None, GAPPY, clock_at(90.0), {})
+    assert state["line"] is None
+    assert state["gap"] == {"after": 2, "until": None}
+    assert state["next"] is None
+
+
+def test_build_state_unsynced_has_no_gap():
+    lyr = Lyrics((Line(0.0, 0.0, "a"),), "none", "t")
+    assert build_state("playing", TRACK, None, lyr, clock_at(5.0), {})["gap"] is None
+
+
+CJK_WORDS = tuple(Word(c, i, i + 1) for i, c in enumerate("夜に駆ける"))
+CJK = Lyrics((Line(0.0, 5.0, "夜に駆ける", CJK_WORDS),), "word", "t")
+
+
+def test_build_state_line_text():
+    state = build_state("playing", TRACK, None, CJK, clock_at(1.5), {})
+    assert state["line"]["text"] == "夜に駆ける"
+
+
+def test_markup_cjk_keeps_spacing():
+    out = hyprlock_markup(CJK, Cursor(0, 1, 0.5, 0), "#ff0000", "#888888")
+    assert out == '<span foreground="#ff0000">夜に</span><span foreground="#888888">駆ける</span>'

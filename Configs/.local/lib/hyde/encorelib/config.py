@@ -14,6 +14,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from .stream import STYLES
+
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
 
@@ -145,7 +147,5 @@ def load_config(env: Mapping[str, str] | None = None, env_file: Path | None = No
         overlay_next_line=_as_bool(get("ENCORE_OVERLAY_NEXT_LINE"), True),
         overlay_color=_unquote(get("ENCORE_OVERLAY_COLOR") or ""),
         overlay_monitor=_unquote(get("ENCORE_OVERLAY_MONITOR") or ""),
-        overlay_style=_as_choice(
-            get("ENCORE_OVERLAY_STYLE"), ("line", "stack", "constellation"), "line"
-        ),
+        overlay_style=_as_choice(get("ENCORE_OVERLAY_STYLE"), STYLES, "line"),
     )

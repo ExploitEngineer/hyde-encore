@@ -7,21 +7,11 @@ repeated words resolve to their own occurrence.
 
 from __future__ import annotations
 
+from .words import word_spans
+
 
 def word_byte_ranges(text: str, words: list[str]) -> list[tuple[int, int]]:
-    ranges: list[tuple[int, int]] = []
-    cursor = 0
-    byte_cursor = 0
-    for word in words:
-        index = text.find(word, cursor)
-        if index < 0:
-            index = text.find(word)
-        if index < 0:
-            ranges.append((byte_cursor, byte_cursor))
-            continue
-        start = len(text[:index].encode("utf-8"))
-        end = start + len(word.encode("utf-8"))
-        ranges.append((start, end))
-        cursor = index + len(word)
-        byte_cursor = end
-    return ranges
+    def to_bytes(index: int) -> int:
+        return len(text[:index].encode("utf-8"))
+
+    return [(to_bytes(a), to_bytes(b)) for a, b in word_spans(text, words)]

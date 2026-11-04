@@ -52,6 +52,20 @@ def test_enhanced_words():
     assert lyr.lines[0].text == "Hel lo you"
 
 
+def test_enhanced_syllables_merge():
+    lyr = parse_lrc("[00:01.00]<00:01.00>Hel<00:01.20>lo <00:01.50>world<00:02.00>")
+    line = lyr.lines[0]
+    assert line.text == "Hello world"
+    assert line.words == (Word("Hello", 1.0, 1.5), Word("world", 1.5, 2.0))
+
+
+def test_enhanced_cjk_keeps_characters():
+    lyr = parse_lrc("[00:01.00]<00:01.00>夜<00:01.30>に<00:01.60>")
+    line = lyr.lines[0]
+    assert line.text == "夜に"
+    assert [w.text for w in line.words] == ["夜", "に"]
+
+
 def test_enhanced_last_word_without_closing_tag_ends_at_next_line():
     lyr = parse_lrc("[00:10.00]<00:10.00>a <00:10.50>b\n[00:12.00]<00:12.00>c")
     assert lyr.lines[0].words[-1].end == 12.0

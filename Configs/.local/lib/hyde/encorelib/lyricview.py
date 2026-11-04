@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-GAP_HIDE_SECONDS = 4.0
+from .timing import GAP_HOLD_SECONDS
+
+GAP_HIDE_SECONDS = GAP_HOLD_SECONDS
 FILL_FPS_HINT = 60
 
 
@@ -72,12 +74,31 @@ def build_view(state: dict | None, now: float) -> View:
     return View(
         visible=True,
         line_key=f"{track['key']}:{line['index']}",
-        text=" ".join(w["text"] for w in words),
+        text=line.get("text") or " ".join(w["text"] for w in words),
         words=fills,
         next_text=state.get("next") or "",
         animating=animating,
         wake_in=wake_in,
     )
+
+
+def lyric_rows(lines: list[dict]) -> list[str]:
+    """Texts of the whole-song list: every line that is not blank."""
+    return [ln["text"] for ln in lines if (ln.get("text") or "").strip()]
+
+
+def lyric_row(state: dict) -> int:
+    """Row of lyric_rows() to highlight, -1 for none.
+
+    The live line wins; in a gap the row of the line the gap follows stays
+    lit, so the list keeps its place through instrumentals.
+    """
+    lines = (state.get("lyrics") or {}).get("lines") or []
+    line = state.get("line")
+    index = line["index"] if line else (state.get("gap") or {}).get("after", -1)
+    if not 0 <= index < len(lines):
+        return -1
+    return len(lyric_rows(lines[: index + 1])) - 1
 
 
 def should_transition(old_key: str, new_key: str) -> bool:
