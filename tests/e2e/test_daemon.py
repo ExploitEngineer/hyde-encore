@@ -152,3 +152,14 @@ def test_bad_rate_falls_back_to_one(playing):
     playing.wait(lambda s: s["rate"] == 1.5)
     playing.set_rate("encoretest", 0.0)
     assert playing.wait(lambda s: s["rate"] == 1.0)["status"] == "playing"
+
+
+def test_polling_while_paused_does_not_leak_fds(playing):
+    import os
+
+    seek_paused(playing, 5.0)
+    fds = lambda: len(os.listdir(f"/proc/{playing.daemon.pid}/fd"))
+    before = fds()
+    for _ in range(300):  # two minutes of the player window's 400 ms polling
+        assert playing.state()["status"] == "paused"
+    assert fds() - before < 10

@@ -296,3 +296,25 @@ def test_hyprlock_colors_follow_the_scheme_for_grey_covers():
     accent, _dim = hyprlock_colors(EncoreConfig(), grey, theme)
     assert accent == "#" + scheme(grey, theme).accent
     assert accent != "#D6D6D6"
+
+
+def test_server_drops_hung_up_clients_without_broadcasting(tmp_path):
+    # the player polls read_state every 400 ms while nothing is broadcast
+    # (paused): closed clients must not pile up until the fd limit kills it
+    server = StateServer(tmp_path / "s.sock")
+    server.start()
+    try:
+        server.broadcast({"status": "paused"})
+        for _ in range(60):  # connect, get the line, hang up: what read_state does
+            poller = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            poller.connect(str(tmp_path / "s.sock"))
+            server.accept()
+            assert poller.makefile("rb").readline() == b'{"status":"paused"}\n'
+            poller.close()
+        live = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        live.connect(str(tmp_path / "s.sock"))
+        server.accept()
+        assert len(server.clients) <= 2  # the live client, maybe the last poller
+        live.close()
+    finally:
+        server.close()
