@@ -743,7 +743,12 @@ class LyricsEngine:
         job): the first 0.2 s of a spring, where nearly all of its travel is;
         its slow tail runs on the timer."""
         if self.style == "line":
-            return self.transition_from is not None and now - self.transition_from < SPRING_FAST
+            if self.transition_from is not None and now - self.transition_from < SPRING_FAST:
+                return True
+            # on the show the fill edge sweeps the big line fast; the desktop
+            # strip, always on, keeps it on the timer
+            playing = (self.state or {}).get("status") == "playing"
+            return not self.desktop and playing and self.view.visible and self.view.animating
         if self.style == "code":
             return False
         playing = (self.state or {}).get("status") == "playing"
