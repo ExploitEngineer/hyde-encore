@@ -62,6 +62,7 @@ from encorelib.motion import (
     SLIDE_SETTLE,
     ease_out,
     frame_interval,
+    frame_source,
     ghosts,
     held_scale,
     pop_in,
@@ -92,6 +93,8 @@ EXIT_SECONDS = 0.3
 EXIT_RISE = 0.3  # share of the height a finished column rises as it leaves
 GHOST_MIN_PX = 6.0  # a ghost closer than this to its word is not drawn
 COLUMN_CY = 0.42  # the big word's center: the column's larger sung word stays clear of the bar
+TIMER_MS = 33  # slow motion's timer: about 30 fps
+SPRING_FAST = 0.2  # a spring's first 0.2 s hold nearly all its travel: 60 fps there
 FAST_SECONDS = 0.16  # ghosts trail through the first, fast part of a slide
 CODE_ROWS = 6  # the code style: five past lines and the one being typed
 COLUMN_ROWS = 3
@@ -340,7 +343,8 @@ class LyricsEngine:
         self.view: View = HIDDEN
         self.prev_draw: tuple[LineRaster, View] | None = None
         self.transition_from: float | None = None
-        self.anim_id = 0  # the frame-clock tick callback while anything moves
+        self.anim_id = 0  # the frame source (tick callback or timer) while anything moves
+        self.anim_kind = "timer"
         self.drawn_at = 0.0  # the frame time of the last lyric frame the tick drew
         self.frame_now: float | None = None  # the display frame being drawn (monotonic s)
         self.timeout_id = 0
@@ -693,17 +697,29 @@ class LyricsEngine:
         return False
 
     def _ensure_anim(self) -> None:
-        # Frames follow the display's frame clock, not a timer: a 33 ms GLib
-        # timer drifts against the 60 Hz refresh and delivered frames 14 and
-        # 65 ms apart (measured), which reads as judder however cheap the frame.
-        # The tick decides per refresh whether to draw (motion.frame_interval).
+        # Pops, slides and exits follow the display's frame clock: a 33 ms timer
+        # drifts against the 60 Hz refresh and delivered frames 14 and 65 ms
+        # apart (measured), which reads as judder where the eye tracks motion.
+        # The clock runs GTK's whole frame cycle at the refresh rate, so slow
+        # motion (drift, sweeps, typing) goes back to a timer (motion.frame_source).
         if not self.anim_id:
             self.drawn_at = 0.0
+            self._add_source("display" if self._fast(time.monotonic()) else "timer")
+
+    def _add_source(self, kind: str) -> None:
+        self.anim_kind = kind
+        if kind == "display":
             self.anim_id = self.widget.add_tick_callback(self._on_tick)
+        else:
+            self.frame_now = None
+            self.anim_id = GLib.timeout_add(TIMER_MS, self._on_timer)
 
     def _drop_anim(self) -> None:
         if self.anim_id:
-            self.widget.remove_tick_callback(self.anim_id)
+            if self.anim_kind == "display":
+                self.widget.remove_tick_callback(self.anim_id)
+            else:
+                GLib.source_remove(self.anim_id)
             self.anim_id = 0
         self.frame_now = None
 
@@ -711,11 +727,28 @@ class LyricsEngine:
         self.frame_now = clock.get_frame_time() / 1_000_000
         return self._animate()
 
+    def _on_timer(self) -> bool:
+        return self._animate()
+
     def _now(self) -> float:
         """The time a frame shows: the display frame's while the clock drives us."""
-        if self.anim_id and self.frame_now is not None:
+        if self.anim_id and self.anim_kind == "display" and self.frame_now is not None:
             return self.frame_now
         return time.monotonic()
+
+    def _fast(self, now: float) -> bool:
+        """A pop, slide, exit or line change is moving fast (the display clock's
+        job): the first 0.2 s of a spring, where nearly all of its travel is;
+        its slow tail runs on the timer."""
+        if self.style == "line":
+            return self.transition_from is not None and now - self.transition_from < SPRING_FAST
+        if self.style == "code":
+            return False
+        return (
+            now - self.fade_from < SPRING_FAST
+            or now - self.slide_from < SPRING_FAST
+            or self.exit_snapshot is not None
+        )
 
     def _animate(self) -> bool:
         now = self._now()
@@ -726,24 +759,27 @@ class LyricsEngine:
         changed_key = view.line_key != self.view.line_key
         self.view = view
         if self.style == "line":
-            fast = self.transition_from is not None
-            continuous = view.animating
+            fast = self._fast(now)
+            continuous = view.animating or self.transition_from is not None
         else:
             self._track_column(view, now)
             playing = (self.state or {}).get("status") == "playing"
             if self.exit_snapshot is not None and now - self.exit_from >= EXIT_SECONDS:
                 self.exit_snapshot = None
-            fast = self._in_motion(now)
-            continuous = self._moves_on_its_own(view) and playing
-        interval = frame_interval(bool(fast), bool(continuous))
-        if changed_key or not view.visible or interval == 0.0:
+            fast = self._fast(now)
+            continuous = (self._moves_on_its_own(view) and playing) or self._in_motion(now)
+        source = frame_source(bool(fast), bool(continuous))
+        if changed_key or not view.visible or source is None:
             self.anim_id = 0
             self.frame_now = None
             GLib.idle_add(self.apply)
             return False
-        if should_draw(now - self.drawn_at, interval):
+        if should_draw(now - self.drawn_at, frame_interval(bool(fast), bool(continuous))):
             self.drawn_at = now
             self.widget.queue_draw()
+        if source != self.anim_kind:  # hand over to the other clock; this one ends
+            self._add_source(source)
+            return False
         return True
 
     # rendering -------------------------------------------------------------

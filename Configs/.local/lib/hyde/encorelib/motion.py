@@ -99,6 +99,17 @@ def frame_interval(fast: bool, continuous: bool) -> float:
     return 1 / SLOW_FPS if continuous else 0.0
 
 
+def frame_source(fast: bool, continuous: bool) -> str | None:
+    """What paces lyric frames: the display's frame clock while a pop, slide or
+    exit moves (no judder where the eye tracks motion), a plain 30 fps timer for
+    slow motion (an active frame clock runs GTK's whole frame cycle at the
+    refresh rate, which measured about 20 points of a core on Full screen),
+    nothing when still."""
+    if fast:
+        return "display"
+    return "timer" if continuous else None
+
+
 def should_draw(elapsed: float, interval: float) -> bool:
     """Whether a refresh `elapsed` seconds after the last drawn frame draws one."""
     return elapsed >= interval - FRAME_SLACK

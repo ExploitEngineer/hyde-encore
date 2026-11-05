@@ -9,6 +9,7 @@ from encorelib.motion import (
     ease_out,
     field_rate,
     frame_interval,
+    frame_source,
     ghosts,
     grain_texture_bytes,
     lerp,
@@ -140,3 +141,12 @@ def test_should_draw_follows_the_display_up_to_the_cap():
     assert not should_draw(1 / 144, 1 / 60) and should_draw(2 / 144, 1 / 60)
     # a late refresh draws at once
     assert should_draw(0.05, 1 / 60)
+
+
+def test_frame_source_uses_the_display_clock_only_for_springs():
+    # the display clock runs GTK's whole frame cycle at the refresh rate, so it
+    # is held only while a pop, slide or exit moves; slow motion takes a timer
+    assert frame_source(fast=True, continuous=False) == "display"
+    assert frame_source(fast=True, continuous=True) == "display"
+    assert frame_source(fast=False, continuous=True) == "timer"
+    assert frame_source(fast=False, continuous=False) is None
