@@ -32,7 +32,7 @@ from gi.repository import Gio, GLib, Graphene, Gtk, Pango, PangoCairo
 from encoregui.scene import Image, Scene
 from encoregui.ui import trace
 from encorelib.bytecache import ByteLRU
-from encorelib.codeview import code_rows, typed_text
+from encorelib.codeview import code_rows, fit_scale, typed_text
 from encorelib.colors import resolve
 from encorelib.colors import scheme as color_scheme
 from encorelib.config import EncoreConfig
@@ -1270,7 +1270,11 @@ class LyricsEngine:
     # code ----------------------------------------------------------------------
 
     def _draw_code(self, sc: Scene, width, height, view: View) -> None:
-        """Past lines as comments, the current one typed word by word, a block caret."""
+        """Past lines as comments, the current one typed word by word, a block caret.
+
+        The block shrinks as one (codeview.fit_scale) when its widest row, the
+        whole current line included, would run past the right edge.
+        """
         state = self.state or {}
         lines = [ln.get("text") or "" for ln in ((state.get("lyrics") or {}).get("lines") or [])]
         index = int((state.get("line") or {}).get("index", 0))
@@ -1280,30 +1284,41 @@ class LyricsEngine:
         size = int(self._line_px() * 0.9)
         number_size = max(10, int(size * 0.8))
         row_h = size * 1.75
-        left = width * 0.1
-        text_x = left + number_size * 2.6  # a gutter for three digits
-        for k, row in enumerate(rows):
-            back = len(rows) - 1 - k  # rows above the current one
-            y = height * 0.6 - back * row_h
-            alpha = 1.0 if row.current else max(0.3, 0.8 - 0.1 * back)
-            number, nw, nh = self._word_surface(
-                str(row.number), number_size, secondary, True, "mono", 0.0, 1.0
-            )
-            sc.image(number, text_x - number_size * 0.9 - (nw - 16) - 8, y - nh / 2, alpha)
-            typed_w = 0.0
+        text_x = width * 0.1 + number_size * 2.6  # a gutter for three digits
+        caret_w = size * 0.56
+        drawn = []
+        for row in rows:
+            surface = None
             if row.text:
                 rgb = lyric if row.current else secondary
                 fill = None if row.current else 1.0  # Secondary carries its own dimming
-                img, w, h = self._word_surface(
+                surface = self._word_surface(
                     row.text, size, rgb, not row.current, "mono", 0.0, fill
                 )
-                sc.image(img, text_x - 8, y - h / 2, alpha)
-                typed_w = w - 16
-            if row.current:
-                gap = size * 0.18 if row.text else 0.0
-                sc.rect(
-                    text_x + typed_w + gap, y - size * 0.55, size * 0.56, size * 1.1, caret, 0.9
+            drawn.append((row, surface))
+        # the whole current line sets the scale, so it holds while the line is typed
+        full = self._word_surface(view.text, size, lyric, False, "mono") if view.text else None
+        widths = [s[1] - 16 for _r, s in drawn if s is not None]
+        if full is not None:
+            widths.append(full[1] - 16 + size * 0.18 + caret_w)
+        scale = fit_scale(widths, width - text_x - width * 0.05)
+        with sc.group(text_x, height * 0.6, scale):
+            for k, (row, surface) in enumerate(drawn):
+                back = len(rows) - 1 - k  # rows above the current one
+                y = -back * row_h
+                alpha = 1.0 if row.current else max(0.3, 0.8 - 0.1 * back)
+                number, nw, nh = self._word_surface(
+                    str(row.number), number_size, secondary, True, "mono", 0.0, 1.0
                 )
+                sc.image(number, -number_size * 0.9 - (nw - 16) - 8, y - nh / 2, alpha)
+                typed_w = 0.0
+                if surface is not None:
+                    img, w, h = surface
+                    sc.image(img, -8, y - h / 2, alpha)
+                    typed_w = w - 16
+                if row.current:
+                    gap = size * 0.18 if row.text else 0.0
+                    sc.rect(typed_w + gap, y - size * 0.55, caret_w, size * 1.1, caret, 0.9)
 
     def _draw_credit(self, sc: Scene, width, height) -> None:
         credit = self._credit_text()

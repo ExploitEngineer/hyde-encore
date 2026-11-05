@@ -30,3 +30,12 @@ def code_rows(lines: list[str], index: int, typed: str, rows: int = 6) -> list[C
         for i in range(first, min(index, len(lines)))
     ]
     return [*past, CodeRow(index + 1, typed, True)]
+
+
+def fit_scale(widths: list[float], available: float, floor: float = 0.25) -> float:
+    """One scale for every row, so the widest fits `available` (never above 1,
+    never below `floor`): long lines shrink the block instead of running off."""
+    widest = max(widths, default=0.0)
+    if widest <= 0.0 or widest <= available:
+        return 1.0
+    return max(floor, available / widest)

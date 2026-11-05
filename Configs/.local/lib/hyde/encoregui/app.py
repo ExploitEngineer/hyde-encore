@@ -168,11 +168,12 @@ class EncoreWindow(Gtk.ApplicationWindow):
                 chrome.set_visible(False)
             if leaving_full:  # page first: the unfullscreen notify must not send us Home
                 self.unfullscreen()
-                # a hero entry still under way must never finish into Full screen
+                # a hero entry still under way must never finish into Full screen,
+                # and the cover the entry grew goes back to Home's size
                 if self.cover_timer:
                     GLib.source_remove(self.cover_timer)
                     self.cover_timer = 0
-                    self.home.cover.set_side(ART)
+                self.home.cover.set_side(ART)
                 self.full.backdrop.cancel_hero()
             self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
             self.stack.set_transition_duration(PAGE_MS)
@@ -192,6 +193,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.stack.set_visible_child_name(name)
         for chrome in (self.header, self.toolbar):  # the show is the page alone
             chrome.set_visible(True)
+        trace(f"home cover {self.home.cover.side}")
         if name == "lyrics":
             GLib.timeout_add(260, lambda: (self.lyrics.scroll_to_current(True), False)[1])
 

@@ -1,4 +1,4 @@
-from encorelib.codeview import CodeRow, code_rows, typed_text
+from encorelib.codeview import CodeRow, code_rows, fit_scale, typed_text
 from encorelib.stream import STYLES
 from encorelib.typeface import role_for
 
@@ -31,3 +31,14 @@ def test_past_lines_read_as_comments_and_blank_ones_stay_blank():
 
 def test_the_first_line_has_no_past():
     assert code_rows(SONG, 0, "Neon", rows=5) == [CodeRow(1, "Neon", True)]
+
+
+def test_rows_shrink_together_to_fit_the_widest():
+    assert fit_scale([300.0, 900.0], 600.0) == 600.0 / 900.0
+    assert fit_scale([300.0, 500.0], 600.0) == 1.0  # never grows
+    assert fit_scale([], 600.0) == 1.0
+
+
+def test_fit_scale_keeps_a_floor_on_a_tiny_window():
+    assert fit_scale([2000.0], 10.0) == 0.25
+    assert fit_scale([2000.0], -5.0) == 0.25

@@ -275,3 +275,19 @@ def test_stage_flag_follows_the_window(lab):
     close_window(lab)
     lab.wait_until(lambda: not flag.exists(), "the flag to go with the window", 10)
     app.wait(10)
+
+
+def test_home_cover_is_back_to_size_after_full_then_stage(lab):
+    """Home -> Full screen -> Stage -> Home: the cover the entry grew to 400 px is
+    back at Home's size, not left big until the pointer hovers it."""
+    trace = lab.tmp / "trace.log"
+    lab.env["ENCORE_TRACE"] = str(trace)
+    _box, app = open_app(lab, lab.lab, "home")
+    assert launch_app(lab, "full", "app-full.log").wait(10) == 0
+    lab.wait_until(lambda: "full.enter" in trace.read_text(), "the full screen entry", 10)
+    assert launch_app(lab, "stage", "app-stage.log").wait(10) == 0
+    assert launch_app(lab, "home", "app-home.log").wait(10) == 0
+    lab.wait_until(lambda: "show_page home from stage" in trace.read_text(), "home", 10)
+    sides = [ln.split()[-1] for ln in trace.read_text().splitlines() if "home cover" in ln]
+    assert sides[-1] == "256", sides
+    app.terminate()
