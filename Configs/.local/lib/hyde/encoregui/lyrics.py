@@ -372,6 +372,8 @@ class LyricsEngine:
         self.fade_words: tuple[str, ...] = ()  # the words of the line last seen
         self.line_dx = 0.0
         self.column_visible = False
+        self.fade_timings: list = []  # the word times of the line last seen
+        self.exit_timings: list = []  # and of the line leaving
         self._last_fade_key = ""
         self.places: dict[tuple, list[tuple[float, float]]] = {}
         self.decoder = LineDecoder()
@@ -658,6 +660,7 @@ class LyricsEngine:
         ix = current_word_index(view) if view.visible else None
         words = tuple(t for t, _ in view.words)
         prev = (self._last_fade_key, self.fade_words, self.last_word_ix, self.column_visible)
+        prev_timings = self.fade_timings
         self.column_visible = view.visible
         change = column_change(prev, view.line_key, words, ix, view.visible, self.style != "code")
         if change is None:
@@ -665,12 +668,14 @@ class LyricsEngine:
         if change.exit is not None:
             key, old_words, old_ix = change.exit
             self.exit_snapshot = (key, list(old_words), old_ix)
+            self.exit_timings = prev_timings  # held words keep their size as they leave
             self.exit_from = now
         if change.slide:
             self.slide_from = now
         if change.pop:
             self.fade_from = now
         self.last_word_ix, self._last_fade_key, self.fade_words = ix, view.line_key, words
+        self.fade_timings = list(((self.state or {}).get("line") or {}).get("words") or [])
 
     def _moves_on_its_own(self, view: View) -> bool:
         """Slow continuous motion while playing: the drift, or the code style
@@ -1118,6 +1123,7 @@ class LyricsEngine:
                             fade=(1 - eased) * alpha,
                             ghost_of=main if lag > 0 else None,
                             pop=False,  # the leaving column's last word is already up
+                            timings=self.exit_timings,
                         )
             else:
                 self.exit_snapshot = None
@@ -1164,6 +1170,7 @@ class LyricsEngine:
         fade=1.0,
         ghost_of: tuple[float, float] | None = None,
         pop=True,
+        timings: list | None = None,
     ) -> None:
         """The rolling column at `now`.
 
@@ -1180,7 +1187,8 @@ class LyricsEngine:
         base = self._column_base(height)
         visual = self.style == "visual"
         alone = ix == 0  # first word of a line sits big in the middle
-        timings = ((self.state or {}).get("line") or {}).get("words") or []
+        if timings is None:  # the line being sung; a leaving column brings its own
+            timings = ((self.state or {}).get("line") or {}).get("words") or []
         for i in range(max(0, ix - 3), ix + 1):
             target = ix - i  # 0 current, 1 previous, 2 two back, 3 leaving
             if alone:
