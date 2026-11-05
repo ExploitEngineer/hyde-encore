@@ -99,6 +99,21 @@ def frame_interval(fast: bool, continuous: bool) -> float:
     return 1 / SLOW_FPS if continuous else 0.0
 
 
+BLOCK_MIN = 0.18  # visual's Highlight block shows as a sliver from the word's start
+BLOCK_LEAD = 1.15  # and is full a little before the word ends
+
+
+def block_width(fill: float) -> float:
+    """The share of its word the Highlight block covers at a word fill (0..1)."""
+    return min(1.0, max(BLOCK_MIN, fill * BLOCK_LEAD))
+
+
+def block_moving(fill: float) -> bool:
+    """Whether the block is still growing: it sweeps hundreds of px a second,
+    so those frames come from the display clock."""
+    return 0.0 < fill * BLOCK_LEAD < 1.0
+
+
 def frame_source(fast: bool, continuous: bool) -> str | None:
     """What paces lyric frames: the display's frame clock while a pop, slide or
     exit moves (no judder where the eye tracks motion), a plain 30 fps timer for

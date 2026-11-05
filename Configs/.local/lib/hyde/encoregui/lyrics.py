@@ -60,6 +60,8 @@ from encorelib.lyricview import (
 from encorelib.motion import (
     POP_SETTLE,
     SLIDE_SETTLE,
+    block_moving,
+    block_width,
     ease_out,
     frame_interval,
     frame_source,
@@ -744,6 +746,11 @@ class LyricsEngine:
             return self.transition_from is not None and now - self.transition_from < SPRING_FAST
         if self.style == "code":
             return False
+        playing = (self.state or {}).get("status") == "playing"
+        if self.style == "visual" and self.view.visible and playing:
+            ix = current_word_index(self.view)
+            if ix >= 0 and block_moving(self.view.words[ix][1]):
+                return True  # the Highlight block sweeps across its word
         return (
             now - self.fade_from < SPRING_FAST
             or now - self.slide_from < SPRING_FAST
@@ -1244,7 +1251,7 @@ class LyricsEngine:
                 block = 1.0
                 if current and visual and not ghost:
                     block_alpha = 0.92 * alpha
-                    block = min(1.0, max(0.18, fill * 1.15))
+                    block = block_width(fill)
                 elif visual and handover > 0.0:
                     block_alpha = 0.92 * alpha * handover  # the block fades as it rises
                 if block_alpha > 0.0:

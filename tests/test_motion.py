@@ -5,6 +5,8 @@ import pytest
 from encorelib.motion import (
     FIELD_FPS,
     blob_center,
+    block_moving,
+    block_width,
     ease_in_out,
     ease_out,
     field_rate,
@@ -150,3 +152,10 @@ def test_frame_source_uses_the_display_clock_only_for_springs():
     assert frame_source(fast=True, continuous=True) == "display"
     assert frame_source(fast=False, continuous=True) == "timer"
     assert frame_source(fast=False, continuous=False) is None
+
+
+def test_highlight_block_grows_with_the_word_and_counts_as_fast_motion():
+    assert block_width(0.0) == 0.18  # a sliver from the first frame
+    assert block_width(0.5) == pytest.approx(0.575)
+    assert block_width(0.9) == 1.0  # full a little before the word ends
+    assert block_moving(0.3) and not block_moving(0.9) and not block_moving(1.0)
