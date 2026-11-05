@@ -1,4 +1,5 @@
-"""Motion helpers shared by the window's widgets: easing, drift, grain."""
+"""Motion helpers shared by the window's widgets and the lyric styles: easing,
+springs and ghost trails, drift, grain."""
 
 from __future__ import annotations
 
@@ -32,6 +33,60 @@ def ease_in_out(t: float) -> float:
 
 def lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
+
+
+PLAIN_SECONDS = 0.16  # motion off: every pop and slide is this plain ease-out
+GHOST_LAGS = (0.055, 0.110)  # seconds behind the moving word, along its own path
+GHOST_ALPHAS = (0.35, 0.18)
+POP_SETTLE = 0.32  # a new word's pop
+SLIDE_SETTLE = 0.24  # the column pushing up
+
+
+def spring(t: float, settle: float = 0.32, zeta: float = 0.55) -> float:
+    """A damped spring's step response: 0 at t=0, overshoots (about 1.13 at
+    zeta 0.55, near 0.43 * settle), and is within 1% of 1 by `settle`, from
+    where it is exactly 1 so animations can stop.
+
+    The closed-form underdamped oscillator; the natural frequency is chosen
+    so the decay envelope e^(-zeta w t) / sqrt(1 - zeta^2) reaches 1% at `settle`.
+    """
+    if t <= 0:
+        return 0.0
+    if t >= settle:
+        return 1.0
+    root = math.sqrt(1 - zeta * zeta)
+    omega = math.log(1 / (0.01 * root)) / (zeta * settle)
+    damped = omega * root
+    decay = math.exp(-zeta * omega * t)
+    return 1 - decay * (math.cos(damped * t) + zeta / root * math.sin(damped * t))
+
+
+def ghosts(progress: float, count: int = 2) -> list[tuple[float, float]]:
+    """The lagged copies drawn behind a sliding word: (lag in seconds, alpha).
+
+    They swell toward mid-slide and are gone at both ends, so a settled column
+    draws nothing extra.
+    """
+    if progress <= 0 or progress >= 1:
+        return []
+    weight = math.sin(math.pi * progress)
+    pairs = zip(GHOST_LAGS, GHOST_ALPHAS, strict=True)
+    return [(lag, alpha * weight) for lag, alpha in pairs][: max(0, count)]
+
+
+def pop_in(age: float, motion: bool) -> tuple[float, float]:
+    """(opacity, scale) of a word `age` seconds after it starts: scale rides the
+    spring from 0.6 to 1.0 (overshooting), opacity is full well before it lands."""
+    p = settle_curve(age, motion, POP_SETTLE)
+    return min(1.0, max(0.0, p * 1.6)), 0.6 + 0.4 * p
+
+
+def settle_curve(age: float, motion: bool, settle: float) -> float:
+    """How far a pop or slide has come: the spring, or a plain 160 ms ease-out
+    when motion is off."""
+    if not motion:
+        return ease_out(age / PLAIN_SECONDS)
+    return spring(age, settle)
 
 
 def blob_center(

@@ -49,7 +49,15 @@ from encorelib.lyricview import (
     stagger,
     word_style,
 )
-from encorelib.motion import ease_out, held_scale
+from encorelib.motion import (
+    POP_SETTLE,
+    SLIDE_SETTLE,
+    ease_out,
+    ghosts,
+    held_scale,
+    pop_in,
+    settle_curve,
+)
 from encorelib.palette import wallpaper_palette
 from encorelib.stream import LineDecoder, should_connect
 from encorelib.wordrects import word_byte_ranges
@@ -62,9 +70,9 @@ FEATHER_PX = 26
 CREDIT_SECONDS = 10.0
 PULSE_GAP_SECONDS = 4.0  # full screen: a soft note pulses through gaps longer than this
 PULSE_MS = 50
-POP_SECONDS = 0.16
-SLIDE_SECONDS = 0.2
-EXIT_SECONDS = 0.26
+EXIT_SECONDS = 0.3
+GHOST_MIN_PX = 6.0  # a ghost closer than this to its word is not drawn
+FAST_SECONDS = 0.16  # the first, fast part of a pop or slide runs at 30 fps; tails at 15
 COLUMN_ROWS = 3
 CONSTELLATION_SCALE = 1.2
 PAST_SCALE = 0.55
@@ -572,11 +580,7 @@ class LyricsEngine:
                     self.fade_from = now
             playing = (self.state or {}).get("status") == "playing"
             drifting = self.motion and view.visible and playing
-            in_motion = (
-                (now - self.fade_from) < POP_SECONDS
-                or (now - self.slide_from) < SLIDE_SECONDS
-                or self.exit_snapshot is not None
-            )
+            in_motion = self._in_motion(now)
             active = view.visible and (in_motion or drifting)
             wake = next_word_boundary(self.state, now) if view.visible else None
             if wake is None:
@@ -598,6 +602,20 @@ class LyricsEngine:
                 self.timeout_id = GLib.timeout_add(max(16, int(wake * 1000) + 8), self._wake)
         self.widget.queue_draw()
 
+    def _pop_seconds(self) -> float:
+        return POP_SETTLE if self.motion else 0.16
+
+    def _slide_seconds(self) -> float:
+        return SLIDE_SETTLE if self.motion else 0.16
+
+    def _in_motion(self, now: float) -> bool:
+        """A pop, a slide (and its ghosts) or a line's exit is under way."""
+        return (
+            (now - self.fade_from) < self._pop_seconds()
+            or (now - self.slide_from) < self._slide_seconds()
+            or self.exit_snapshot is not None
+        )
+
     def _wake(self) -> bool:
         self.timeout_id = 0
         self.apply()
@@ -618,7 +636,7 @@ class LyricsEngine:
 
     def _animate(self) -> bool:
         now = time.monotonic()
-        if self.transition_from is not None and now - self.transition_from > TRANSITION_SECONDS:
+        if self.transition_from is not None and now - self.transition_from > self._line_seconds():
             self.transition_from = None
             self.prev_draw = None
         view = build_view(self.state, now)
@@ -644,16 +662,18 @@ class LyricsEngine:
             playing = (self.state or {}).get("status") == "playing"
             if self.exit_snapshot is not None and now - self.exit_from >= EXIT_SECONDS:
                 self.exit_snapshot = None
-            moving = (
-                (now - self.fade_from) < POP_SECONDS
-                or (now - self.slide_from) < SLIDE_SECONDS
-                or self.exit_snapshot is not None
-            )
+            moving = self._in_motion(now)
             drifting = self.motion and view.visible and playing
             still = moving or drifting
-            if still and not moving and not changed_key:
-                # the idle drift moves a few pixels a second: 15 fps reads the
-                # same as 30 and halves the compositing of a full-screen canvas
+            fast = (
+                (now - self.fade_from) < FAST_SECONDS
+                or (now - self.slide_from) < FAST_SECONDS
+                or self.exit_snapshot is not None
+            )
+            if still and not fast and not changed_key:
+                # the idle drift and a spring's tail move a few pixels a second:
+                # 15 fps reads the same as 30 and halves the compositing of a
+                # full-screen canvas (frames are the cost, DECISIONS #36)
                 self.drift_frame = not getattr(self, "drift_frame", False)
                 if self.drift_frame:
                     return True
@@ -890,9 +910,12 @@ class LyricsEngine:
         )
 
     def _pop(self, now: float) -> tuple[float, float]:
-        p = min(1.0, max(0.0, (now - self.fade_from) / POP_SECONDS))
-        eased = 1 - (1 - p) ** 3
-        return 0.35 + 0.65 * eased, 0.9 + 0.1 * eased
+        """(opacity, scale) of the word being sung: it pops in on the spring."""
+        return pop_in(now - self.fade_from, self.motion)
+
+    def _line_seconds(self) -> float:
+        """How long the line style's line change runs: the spring's settle."""
+        return max(TRANSITION_SECONDS, POP_SETTLE if self.motion else 0.16)
 
     # rolling column (stack and visual styles) --------------------------------
     # Reference semantics (official hero video, 6 fps): three slots scroll up.
@@ -956,40 +979,86 @@ class LyricsEngine:
         if self.exit_snapshot is not None:
             age = now - self.exit_from
             if age < EXIT_SECONDS:
-                # line change: the finished column rises and fades as one piece
-                eased = 1 - (1 - age / EXIT_SECONDS) ** 3
+                # line change: the finished column rises and fades as one piece,
+                # its ghosts trailing below it along the same path
                 key, texts, old_ix = self.exit_snapshot
-                if old_ix >= 0:
-                    self._draw_column(
-                        sc,
-                        width,
-                        height,
-                        key,
-                        texts,
-                        old_ix,
-                        1.0,
-                        1.0,
-                        now,
-                        dy=-eased * height * 0.16,
-                        fade=1 - eased,
-                    )
+                trail = ghosts(age / EXIT_SECONDS) if self.motion else []
+                rise = height * 0.16
+                main = (1.0, -ease_out(age / EXIT_SECONDS) * rise)
+                for lag, alpha in [*reversed(trail), (0.0, 1.0)]:
+                    eased = ease_out((age - lag) / EXIT_SECONDS)
+                    if old_ix >= 0:
+                        self._draw_column(
+                            sc,
+                            width,
+                            height,
+                            key,
+                            texts,
+                            old_ix,
+                            1.0,
+                            1.0,
+                            now - lag,
+                            dy=-eased * rise,
+                            fade=(1 - eased) * alpha,
+                            ghost_of=main if lag > 0 else None,
+                            pop=False,  # the leaving column's last word is already up
+                        )
             else:
                 self.exit_snapshot = None
         ix = current_word_index(view)
         if ix < 0:
             return
-        slide = 1.0
-        if now - self.slide_from < SLIDE_SECONDS:
-            p = (now - self.slide_from) / SLIDE_SECONDS
-            slide = 1 - (1 - p) ** 3
         texts = [t for t, _ in view.words]
+        age = now - self.slide_from
+        main_slide = settle_curve(age, self.motion, SLIDE_SETTLE)
+        if self.motion and age < FAST_SECONDS:
+            # the words that moved leave ghosts along the fast part of their
+            # slide, drawn first; the spring's slow tail leaves none
+            for lag, alpha in reversed(ghosts(age / FAST_SECONDS)):
+                slide = settle_curve(age - lag, True, SLIDE_SETTLE)
+                self._draw_column(
+                    sc,
+                    width,
+                    height,
+                    view.line_key,
+                    texts,
+                    ix,
+                    1.0,
+                    slide,
+                    now - lag,
+                    fade=alpha,
+                    ghost_of=(main_slide, 0.0),
+                )
         self._draw_column(
-            sc, width, height, view.line_key, texts, ix, view.words[ix][1], slide, now
+            sc, width, height, view.line_key, texts, ix, view.words[ix][1], main_slide, now
         )
 
     def _draw_column(
-        self, sc: Scene, width, height, line_key, texts, ix, fill, slide, now, dy=0.0, fade=1.0
+        self,
+        sc: Scene,
+        width,
+        height,
+        line_key,
+        texts,
+        ix,
+        fill,
+        slide,
+        now,
+        dy=0.0,
+        fade=1.0,
+        ghost_of: tuple[float, float] | None = None,
+        pop=True,
     ) -> None:
+        """The rolling column at `now`.
+
+        A ghost pass (`ghost_of` = the main pass's slide and dy) draws only the
+        words (no Highlight block, no glyphs), faded by `fade`, and only where a
+        copy lags its word by GHOST_MIN_PX or more: a copy on top of its word is
+        invisible and would only cost a draw. Only the two words that travel
+        farthest (the sung word and the one just sung) trail: every extra
+        textured node costs the renderer, and the top words are small and fading.
+        """
+        ghost = ghost_of is not None
         lyric, highlight, secondary = self._trio()
         cy = height * 0.47 + dy
         base = self._column_base(height)
@@ -1000,10 +1069,10 @@ class LyricsEngine:
             target = ix - i  # 0 current, 1 previous, 2 two back, 3 leaving
             if alone:
                 target = 1
-            slot = target - 1 + slide if (not alone and slide < 1.0) else target
+            slot = target - 1 + slide if (not alone and slide != 1.0) else target
             slot = max(-1.0, min(3.0, slot))
             alpha = self._lerp_slot(self.SLOT_ALPHA, slot) * fade
-            if alpha <= 0.01:
+            if alpha <= (0.05 if ghost else 0.01):
                 continue
             scale_rel = self._lerp_slot(self.SLOT_SCALE, slot)
             if i < len(timings):  # a word held longer is set larger (Verso's rule)
@@ -1015,9 +1084,15 @@ class LyricsEngine:
             target_slot = max(0, min(2, target))
             largest = max(self.SLOT_SCALE[target_slot], self.SLOT_SCALE[target_slot - 1])
             ref_size = max(12, int(base * largest))
+            current = i == ix
+            if current and pop:  # the word being sung pops in on the spring
+                pop_alpha, pop_scale = self._pop(now)
+                alpha *= pop_alpha
+                scale_rel *= pop_scale
+                if alpha <= 0.01:
+                    continue
             zoom = max(0.05, (base * scale_rel) / ref_size)
             shear = -0.10 * (target_slot - 1)
-            current = i == ix
             if current and visual:
                 rgb, dim = self._on_highlight(), False
             elif current:
@@ -1033,10 +1108,19 @@ class LyricsEngine:
             )
             cx = width / 2 + self._stagger(line_key, i, width)
             y = self._slot_y(slot, cy, base)
+            if ghost_of is not None:
+                if target > 1:  # only the sung word and the big one just sung trail
+                    continue
+                main_slide, main_dy = ghost_of
+                main_slot = target - 1 + main_slide if (not alone and main_slide != 1.0) else target
+                main_slot = max(-1.0, min(3.0, main_slot))
+                main_y = self._slot_y(main_slot, height * 0.47 + main_dy, base)
+                if abs(y - main_y) < GHOST_MIN_PX:
+                    continue
             if self.motion and (self.state or {}).get("status") == "playing" and current:
                 cx += 2.0 * math.sin(now * 1.3 + i)
             with sc.group(cx, y, zoom):
-                if current and visual:
+                if current and visual and not ghost:
                     block = min(1.0, max(0.18, fill * 1.15))
                     pad_x, pad_y = 10, 4
                     bw = (w - 16 + 2 * pad_x) * block
@@ -1044,7 +1128,7 @@ class LyricsEngine:
                     with sc.group(skew_x=-0.18):
                         sc.rect(-(w - 16) / 2 - pad_x, -bh / 2 + 1, bw, bh, highlight, 0.92 * alpha)
                 sc.image(img, -w / 2, -h / 2, alpha)
-                if visual and slot <= 1.4:
+                if visual and slot <= 1.4 and not ghost:
                     glyph = glyph_for(texts[i])
                     if glyph:
                         gimg, gw, gh = self._word_surface(
@@ -1238,12 +1322,14 @@ class LyricsEngine:
         }[self.position]
 
         if self.transition_from is not None:
-            progress = min(1.0, (now - self.transition_from) / TRANSITION_SECONDS)
-            eased = 1 - (1 - progress) ** 3
+            age = now - self.transition_from
+            eased = ease_out(age / TRANSITION_SECONDS)
             if self.prev_draw is not None:
                 prev_raster, prev_view = self.prev_draw
                 self._paint_line(sc, prev_raster, prev_view, base - eased * SLIDE_PX, 1 - eased)
-            self._paint_line(sc, raster, view, base + (1 - eased) * SLIDE_PX, eased)
+            # the new line pops up into place: on the spring, it rises a touch past it
+            rise = settle_curve(age, self.motion, POP_SETTLE)
+            self._paint_line(sc, raster, view, base + (1 - rise) * SLIDE_PX, eased)
         else:
             self._paint_line(sc, raster, view, base, 1.0)
 

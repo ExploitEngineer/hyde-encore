@@ -1,13 +1,19 @@
 from itertools import pairwise
 
+import pytest
+
 from encorelib.motion import (
     FIELD_FPS,
     blob_center,
     ease_in_out,
     ease_out,
     field_rate,
+    ghosts,
     grain_texture_bytes,
     lerp,
+    pop_in,
+    settle_curve,
+    spring,
 )
 
 
@@ -61,3 +67,57 @@ def test_field_rate_holds_when_paused():
     assert field_rate(playing=False, idle=True) == FIELD_FPS
     assert field_rate(playing=False, idle=False) == 0
     assert FIELD_FPS >= 1
+
+
+def test_spring_ends():
+    assert spring(0) == 0.0 and spring(-1) == 0.0
+    assert spring(0.32) == 1.0 and spring(5) == 1.0
+    assert spring(0.24, settle=0.24) == 1.0
+
+
+def test_spring_overshoots_then_settles():
+    ts = [i / 1000 for i in range(321)]
+    xs = [spring(t) for t in ts]
+    peak = max(xs)
+    assert 1.05 <= peak <= 1.15  # a visible pop
+    assert ts[xs.index(peak)] <= 0.6 * 0.32
+    assert all(-0.01 <= x <= 1.2 for x in xs)  # bounded
+    assert abs(spring(0.32 - 1e-6) - 1) <= 0.01  # within 1% by settle: the clamp never jumps
+
+
+def test_spring_final_approach_is_monotonic():
+    # after the last extremum before settle the curve only closes in on 1
+    ts = [0.32 * (0.87 + i / 1000) for i in range(131)]
+    xs = [spring(t) for t in ts]
+    assert all(b >= a - 1e-9 for a, b in pairwise(xs))
+
+
+def test_ghosts_swell_mid_slide_and_vanish_when_settled():
+    assert ghosts(0.0) == [] and ghosts(1.0) == [] and ghosts(1.4) == [] and ghosts(-0.2) == []
+    mid = ghosts(0.5)
+    assert [lag for lag, _ in mid] == [0.055, 0.110]
+    assert mid[0][1] == pytest.approx(0.35) and mid[1][1] == pytest.approx(0.18)
+    assert ghosts(0.1)[0][1] < mid[0][1]
+    assert len(ghosts(0.5, count=1)) == 1
+    assert ghosts(0.5, count=0) == []
+
+
+def test_settle_curve_without_motion_is_a_plain_ease():
+    assert settle_curve(0.08, False, 0.24) == pytest.approx(ease_out(0.5))
+    assert settle_curve(0.16, False, 0.24) == 1.0
+    assert settle_curve(0.1, True, 0.24) == pytest.approx(spring(0.1, 0.24))
+    assert settle_curve(-1, True, 0.24) == 0.0
+
+
+def test_pop_in_grows_from_six_tenths_with_a_visible_overshoot():
+    assert pop_in(0.0, True) == (0.0, 0.6)
+    assert pop_in(1.0, True) == (1.0, 1.0)
+    scales = [pop_in(i / 1000, True)[1] for i in range(330)]
+    assert max(scales) > 1.03  # the overshoot shows
+    alphas = [pop_in(i / 1000, True)[0] for i in range(330)]
+    assert all(0.0 <= a <= 1.0 for a in alphas)
+
+
+def test_pop_in_without_motion_never_overshoots():
+    scales = [pop_in(i / 1000, False)[1] for i in range(200)]
+    assert max(scales) == 1.0 and min(scales) == 0.6
