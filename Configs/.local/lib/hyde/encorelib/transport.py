@@ -69,3 +69,24 @@ def page_after(action: str, page: str, came_from: str) -> str | None:
             return "stage" if came_from == "stage" else "home"
         return "full"
     return None
+
+
+ONCE_PER_PRESS = {"fullscreen", "stage", "back", "lyrics", "play-pause", "next", "previous"}
+
+
+class HeldKeys:
+    """Key auto-repeat: page switches and player commands act once per press
+    (holding F must not bounce between Full screen and the window); seeking and
+    volume keep repeating while the key is held."""
+
+    def __init__(self) -> None:
+        self.down: set[str] = set()
+
+    def press(self, key: str, action: str) -> bool:
+        """Whether this key-press event should act."""
+        repeat = key in self.down
+        self.down.add(key)
+        return not (repeat and action in ONCE_PER_PRESS)
+
+    def release(self, key: str) -> None:
+        self.down.discard(key)

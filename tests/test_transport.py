@@ -81,3 +81,14 @@ def test_page_after_back_is_always_home():
     assert page_after("back", "stage", "home") == "home"
     assert page_after("back", "full", "stage") == "home"
     assert page_after("lyrics", "home", "home") is None  # not a page switch here
+
+
+def test_held_keys_switch_pages_once_but_seek_on_repeat():
+    from encorelib.transport import HeldKeys
+
+    keys = HeldKeys()
+    assert keys.press("f", "fullscreen")  # the first press acts
+    assert not keys.press("f", "fullscreen")  # auto-repeat while held: ignored
+    keys.release("f")
+    assert keys.press("f", "fullscreen")  # a new press acts again
+    assert keys.press("Right", "seek-forward") and keys.press("Right", "seek-forward")

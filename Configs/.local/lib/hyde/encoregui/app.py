@@ -41,7 +41,7 @@ from encorelib.screen import screen_state
 from encorelib.service import surface_log
 from encorelib.session import player_label
 from encorelib.single import pid_alive, read_pid
-from encorelib.transport import key_action, page_after, step_volume
+from encorelib.transport import HeldKeys, key_action, page_after, step_volume
 
 APP_ID = os.environ.get("ENCORE_APP_ID", "org.hyde.encore")
 ENCORE_PY = str(Path(__file__).resolve().parent.parent / "encore.py")
@@ -80,6 +80,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.accent_css.load_from_string(accent_rules(self.colors))
         self.page = "home"
         self.came_from = "home"  # the page Full screen was entered from
+        self.held_keys = HeldKeys()
         self.silent_since: float | None = None
         self.restarted = False
         self.lock_on = False
@@ -117,6 +118,9 @@ class EncoreWindow(Gtk.ApplicationWindow):
         # capture phase: Space pauses even when a just-clicked button has focus
         key.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key.connect("key-pressed", self._on_key)
+        key.connect("key-released", lambda _c, keyval, *_: self.held_keys.release(str(keyval)))
+        # a release lost to a focus change must never swallow the next press
+        self.connect("notify::is-active", lambda *_: self.held_keys.down.clear())
         self.add_controller(key)
         self._poll()
         GLib.timeout_add(POLL_MS, self._poll)
@@ -461,6 +465,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
         action = key_action(Gdk.keyval_name(keyval) or "", ctrl, self.page)
         if action is None:
             return False
+        if not self.held_keys.press(str(keyval), action):
+            return True  # auto-repeat of a key that acts once per press
         if action == "play-pause":
             self.ctl("play-pause")
         elif action in ("next", "previous"):
