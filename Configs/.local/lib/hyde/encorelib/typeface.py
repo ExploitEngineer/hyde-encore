@@ -105,11 +105,12 @@ def mono_partner(have: Faces) -> str:
 
 def primary_family(font: str, have: Faces) -> str:
     """The first installed family of a font list ("SF Pro Display, Inter, sans-serif"),
-    else the first installed display font; with nothing known, the first name."""
+    else the first installed display font, else fontconfig's Sans; with nothing
+    known at all (no font list read), the first name."""
     names = tuple(name.strip() for name in font.split(",") if name.strip())
     if not have:
         return names[0] if names else DISPLAY_FONTS[0]
-    return _first(names, have, _first(DISPLAY_FONTS, have, names[0] if names else "Sans"))
+    return _first(names, have, _first(DISPLAY_FONTS, have, "Sans"))
 
 
 def face_for(role: str, primary: str, have: Faces) -> Face:

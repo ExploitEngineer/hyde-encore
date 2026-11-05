@@ -116,3 +116,9 @@ def test_menu_fonts_show_the_family_in_use():
     assert menu_fonts(shown, "Inter") == shown
     # an installed family set outside the menu (from the CLI) joins the list
     assert menu_fonts(shown, "Noto Sans") == ["SF Pro Display", "Inter", "Noto Sans"]
+
+
+def test_a_box_without_any_known_family_falls_back_to_sans():
+    # none of the look's families and no display font installed: fontconfig's
+    # Sans, never a name that is not there
+    assert primary_family("Futura, Avenir", {"Cantarell": {(400, False)}}) == "Sans"
