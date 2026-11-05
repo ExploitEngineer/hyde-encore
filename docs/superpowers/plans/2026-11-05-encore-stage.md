@@ -269,4 +269,26 @@ Only if Tasks 1-5 are committed green and the clock is before 16:30 PKT.
 
 ## Handoff
 
-(written at the end of the pass)
+Written 2026-11-05 at the end of the pass; every task finished green, nothing was reverted.
+
+### What shipped (commits on `feat/encore-app`)
+- `3eb4976` this plan.
+- Task 1 `e69fc59`: the Stage window (page `stage`, W, Home's window button, Window and Full screen pills); the flag follows the window (`stageflag.wanted`); lab test `test_stage_flag_follows_the_window`.
+- Task 2 `43c5060`: `motion.spring`, `ghosts`, `pop_in`, `settle_curve`; pops in every style, spring slides and ghost trails in stack and visual, exit ghosts, the line style's spring rise.
+- Task 3 `e3e441f`: `encorelib/typeface.py`, faces per word and style from the installed weights, the display font list.
+- `6fa0866`: the hero race lab test compared against the wrong Home switch (flaky; fixed).
+- Task 4 `277e24c`: color floors on #141317, the deeper Highlight block, Secondary at full fill, the `gradient` key and the Background and Gradient rows.
+- Task 5 `761b40d`: panel tokens (eyebrows, 36 px rows, round swatches, slider values, Font dropdown).
+- Task 6 `0be19b3`: the `code` style.
+- Final review fixes `2f4f490`: the Home cover after Full screen -> Stage -> Home, code rows that ran off the window.
+
+### Evidence
+- Suite 521 passed, lab 9 passed, ruff clean at `2f4f490`.
+- Stills and clips under `.stage/stage-1` to `.stage/stage-6` (each has a sheet next to the reference frames); measured numbers in `docs/STATE.md` and DECISIONS #39-#42.
+- The ledger (`.superpowers/sdd/2026-11-05-encore-stage/progress.md`, local) holds every ruling (R1-R24 and the final ones) and every reading.
+
+### Open
+- Deferred minors from the final review are listed in `docs/STATE.md` under Broken.
+- Not verified: the desktop lyrics returning when the Stage sits on another ordinary workspace (the lab used a hidden special workspace).
+- Full screen stack and visual read 2-3 points over the previous commit with ghosts; the run spread is wider than that.
+- First on the owner's screen: the Stage window (W) with the visual style on Clear, then F and back, then the code style, then the look menu and Settings.
