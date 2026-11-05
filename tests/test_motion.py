@@ -8,11 +8,13 @@ from encorelib.motion import (
     ease_in_out,
     ease_out,
     field_rate,
+    frame_interval,
     ghosts,
     grain_texture_bytes,
     lerp,
     pop_in,
     settle_curve,
+    should_draw,
     spring,
 )
 
@@ -121,3 +123,20 @@ def test_pop_in_grows_from_six_tenths_with_a_visible_overshoot():
 def test_pop_in_without_motion_never_overshoots():
     scales = [pop_in(i / 1000, False)[1] for i in range(200)]
     assert max(scales) == 1.0 and min(scales) == 0.6
+
+
+def test_frame_interval_caps_the_rate_per_kind_of_motion():
+    assert frame_interval(fast=True, continuous=False) == pytest.approx(1 / 60)
+    assert frame_interval(fast=True, continuous=True) == pytest.approx(1 / 60)
+    assert frame_interval(fast=False, continuous=True) == pytest.approx(1 / 30)
+    assert frame_interval(fast=False, continuous=False) == 0.0  # nothing moves: stop
+
+
+def test_should_draw_follows_the_display_up_to_the_cap():
+    # 60 Hz panel: springs draw on every refresh, slow motion on every other
+    assert should_draw(1 / 60, 1 / 60)
+    assert not should_draw(1 / 60, 1 / 30) and should_draw(2 / 60, 1 / 30)
+    # 144 Hz panel: a spring draws about every other refresh, never all 144
+    assert not should_draw(1 / 144, 1 / 60) and should_draw(2 / 144, 1 / 60)
+    # a late refresh draws at once
+    assert should_draw(0.05, 1 / 60)

@@ -81,6 +81,29 @@ def pop_in(age: float, motion: bool) -> tuple[float, float]:
     return min(1.0, max(0.0, p * 1.6)), 0.6 + 0.4 * p
 
 
+FAST_FPS = 60  # pops, slides and exits
+SLOW_FPS = 30  # the drift and fill sweeps
+FRAME_SLACK = 0.004  # frame times jitter; a refresh this early still counts
+
+
+def frame_interval(fast: bool, continuous: bool) -> float:
+    """The shortest time between drawn lyric frames, 0 when nothing moves.
+
+    A pop, slide or exit draws at up to 60 fps, so it moves at a 60 Hz
+    display's rate and never judders; slow continuous motion (the drift, a
+    fill sweep) at up to 30. Frames come from the display's frame clock, so a
+    faster panel is capped instead of drawing at 144 fps.
+    """
+    if fast:
+        return 1 / FAST_FPS
+    return 1 / SLOW_FPS if continuous else 0.0
+
+
+def should_draw(elapsed: float, interval: float) -> bool:
+    """Whether a refresh `elapsed` seconds after the last drawn frame draws one."""
+    return elapsed >= interval - FRAME_SLACK
+
+
 def settle_curve(age: float, motion: bool, settle: float) -> float:
     """How far a pop or slide has come: the spring, or a plain 160 ms ease-out
     when motion is off."""

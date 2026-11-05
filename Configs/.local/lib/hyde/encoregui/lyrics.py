@@ -53,10 +53,12 @@ from encorelib.motion import (
     POP_SETTLE,
     SLIDE_SETTLE,
     ease_out,
+    frame_interval,
     ghosts,
     held_scale,
     pop_in,
     settle_curve,
+    should_draw,
 )
 from encorelib.palette import wallpaper_palette
 from encorelib.stream import LineDecoder, should_connect
@@ -72,7 +74,6 @@ from encorelib.typeface import (
 from encorelib.wordrects import word_byte_ranges
 
 TRANSITION_SECONDS = 0.22
-ANIMATE_MS = 33
 WORD_CACHE_BYTES = 48 * 1024 * 1024
 SLIDE_PX = 26
 FEATHER_PX = 26
@@ -81,8 +82,8 @@ PULSE_GAP_SECONDS = 4.0  # full screen: a soft note pulses through gaps longer t
 PULSE_MS = 50
 EXIT_SECONDS = 0.3
 GHOST_MIN_PX = 6.0  # a ghost closer than this to its word is not drawn
-FAST_SECONDS = 0.16
-CODE_ROWS = 6  # the code style: five past lines and the one being typed  # the first, fast part of a pop or slide runs at 30 fps; tails at 15
+FAST_SECONDS = 0.16  # ghosts trail through the first, fast part of a slide
+CODE_ROWS = 6  # the code style: five past lines and the one being typed
 COLUMN_ROWS = 3
 CONSTELLATION_SCALE = 1.2
 PAST_SCALE = 0.55
@@ -329,7 +330,9 @@ class LyricsEngine:
         self.view: View = HIDDEN
         self.prev_draw: tuple[LineRaster, View] | None = None
         self.transition_from: float | None = None
-        self.anim_id = 0
+        self.anim_id = 0  # the frame-clock tick callback while anything moves
+        self.drawn_at = 0.0  # the frame time of the last lyric frame the tick drew
+        self.frame_now: float | None = None  # the display frame being drawn (monotonic s)
         self.timeout_id = 0
         self.rasters: dict[tuple, LineRaster] = {}
         self.small: dict[tuple, LineRaster] = {}
@@ -670,20 +673,32 @@ class LyricsEngine:
         return False
 
     def _ensure_anim(self) -> None:
-        # A plain 30 fps timer, not a frame-clock tick callback: an active
-        # tick callback makes GTK run its whole frame cycle at the monitor
-        # rate, which alone costs more than the drawing does. The feathered
-        # edge keeps the half-rate sweep looking continuous.
+        # Frames follow the display's frame clock, not a timer: a 33 ms GLib
+        # timer drifts against the 60 Hz refresh and delivered frames 14 and
+        # 65 ms apart (measured), which reads as judder however cheap the frame.
+        # The tick decides per refresh whether to draw (motion.frame_interval).
         if not self.anim_id:
-            self.anim_id = GLib.timeout_add(ANIMATE_MS, self._animate)
+            self.drawn_at = 0.0
+            self.anim_id = self.widget.add_tick_callback(self._on_tick)
 
     def _drop_anim(self) -> None:
         if self.anim_id:
-            GLib.source_remove(self.anim_id)
+            self.widget.remove_tick_callback(self.anim_id)
             self.anim_id = 0
+        self.frame_now = None
+
+    def _on_tick(self, _widget, clock) -> bool:
+        self.frame_now = clock.get_frame_time() / 1_000_000
+        return self._animate()
+
+    def _now(self) -> float:
+        """The time a frame shows: the display frame's while the clock drives us."""
+        if self.anim_id and self.frame_now is not None:
+            return self.frame_now
+        return time.monotonic()
 
     def _animate(self) -> bool:
-        now = time.monotonic()
+        now = self._now()
         if self.transition_from is not None and now - self.transition_from > self._line_seconds():
             self.transition_from = None
             self.prev_draw = None
@@ -691,7 +706,8 @@ class LyricsEngine:
         changed_key = view.line_key != self.view.line_key
         self.view = view
         if self.style == "line":
-            still = view.animating or self.transition_from
+            fast = self.transition_from is not None
+            continuous = view.animating
         else:
             ix = current_word_index(view) if view.visible else None
             if view.visible and (ix, view.line_key) != (self.last_word_ix, self._last_fade_key):
@@ -710,26 +726,17 @@ class LyricsEngine:
             playing = (self.state or {}).get("status") == "playing"
             if self.exit_snapshot is not None and now - self.exit_from >= EXIT_SECONDS:
                 self.exit_snapshot = None
-            moving = self._in_motion(now)
-            drifting = self._drifts() and view.visible and playing
-            still = moving or drifting
-            fast = (
-                (now - self.fade_from) < FAST_SECONDS
-                or (now - self.slide_from) < FAST_SECONDS
-                or self.exit_snapshot is not None
-            )
-            if still and not fast and not changed_key:
-                # the idle drift and a spring's tail move a few pixels a second:
-                # 15 fps reads the same as 30 and halves the compositing of a
-                # full-screen canvas (frames are the cost, DECISIONS #36)
-                self.drift_frame = not getattr(self, "drift_frame", False)
-                if self.drift_frame:
-                    return True
-        if changed_key or not view.visible or not still:
+            fast = self._in_motion(now)
+            continuous = self._drifts() and view.visible and playing
+        interval = frame_interval(bool(fast), bool(continuous))
+        if changed_key or not view.visible or interval == 0.0:
             self.anim_id = 0
+            self.frame_now = None
             GLib.idle_add(self.apply)
             return False
-        self.widget.queue_draw()
+        if should_draw(now - self.drawn_at, interval):
+            self.drawn_at = now
+            self.widget.queue_draw()
         return True
 
     # rendering -------------------------------------------------------------
@@ -1026,7 +1033,7 @@ class LyricsEngine:
         return table.get(lo, 0.0) * (1 - t) + table.get(hi, 0.0) * t
 
     def _draw_rolling(self, sc: Scene, width, height, view: View) -> None:
-        now = time.monotonic()
+        now = self._now()
         if self.exit_snapshot is not None:
             age = now - self.exit_from
             if age < EXIT_SECONDS:
@@ -1250,7 +1257,7 @@ class LyricsEngine:
             self._paint_word(sc, img, x, y, alpha * fade, zoom)
 
     def _draw_constellation(self, sc: Scene, width, height, view: View) -> None:
-        now = time.monotonic()
+        now = self._now()
         if self.exit_snapshot is not None:
             age = now - self.exit_from
             if age < EXIT_SECONDS:
@@ -1423,7 +1430,7 @@ class LyricsEngine:
         raster = self._raster_for(view)
         if raster is None:
             return
-        now = time.monotonic()
+        now = self._now()
         next_raster = self._small_raster(view.next_text, "next") if self.show_next else None
         credit = self._credit_text()
         credit_raster = self._small_raster(credit, "credit") if credit else None
