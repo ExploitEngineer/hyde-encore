@@ -32,7 +32,7 @@ from gi.repository import Gio, GLib, Graphene, Gtk, Pango, PangoCairo
 from encoregui.scene import Image, Scene
 from encoregui.ui import trace
 from encorelib.bytecache import ByteLRU
-from encorelib.codeview import code_rows, fit_scale, typed_text
+from encorelib.codeview import code_rows, fit_scale, typed_text, typing
 from encorelib.colors import resolve
 from encorelib.colors import scheme as color_scheme
 from encorelib.config import EncoreConfig
@@ -616,7 +616,7 @@ class LyricsEngine:
             self.prev_draw = None
             self._track_column(view, now)
             playing = (self.state or {}).get("status") == "playing"
-            drifting = self._drifts() and view.visible and playing
+            drifting = self._moves_on_its_own(view) and playing
             in_motion = self._in_motion(now)
             active = view.visible and (in_motion or drifting)
             wake = next_word_boundary(self.state, now) if view.visible else None
@@ -663,6 +663,15 @@ class LyricsEngine:
         if change.pop:
             self.fade_from = now
         self.last_word_ix, self._last_fade_key, self.fade_words = ix, view.line_key, words
+
+    def _moves_on_its_own(self, view: View) -> bool:
+        """Slow continuous motion while playing: the drift, or the code style
+        typing a word out letter by letter."""
+        if not view.visible:
+            return False
+        if self.style == "code":
+            return typing(view.words)
+        return self._drifts()
 
     def _drifts(self) -> bool:
         """Whether this style floats while playing (code stands still: a frame per word)."""
@@ -725,7 +734,7 @@ class LyricsEngine:
             if self.exit_snapshot is not None and now - self.exit_from >= EXIT_SECONDS:
                 self.exit_snapshot = None
             fast = self._in_motion(now)
-            continuous = self._drifts() and view.visible and playing
+            continuous = self._moves_on_its_own(view) and playing
         interval = frame_interval(bool(fast), bool(continuous))
         if changed_key or not view.visible or interval == 0.0:
             self.anim_id = 0
@@ -1282,10 +1291,16 @@ class LyricsEngine:
         if self.exit_snapshot is not None:
             age = now - self.exit_from
             if age < EXIT_SECONDS:
+                # the finished chain rises a little and draws back as it fades,
+                # so the new chain never grows on top of it
                 line_key, texts, ix = self.exit_snapshot
-                self._draw_cluster(
-                    sc, width, height, line_key, texts, ix, now, 1 - age / EXIT_SECONDS
-                )
+                eased = ease_out(age / EXIT_SECONDS)
+                shrink = 1.0 - 0.12 * eased
+                rise = height * 0.1 * eased
+                with sc.group(width / 2 * (1 - shrink), height / 2 * (1 - shrink) - rise, shrink):
+                    self._draw_cluster(
+                        sc, width, height, line_key, texts, ix, now, 1 - age / EXIT_SECONDS
+                    )
             else:
                 self.exit_snapshot = None
         ix = current_word_index(view)

@@ -42,3 +42,19 @@ def test_rows_shrink_together_to_fit_the_widest():
 def test_fit_scale_keeps_a_floor_on_a_tiny_window():
     assert fit_scale([2000.0], 10.0) == 0.25
     assert fit_scale([2000.0], -5.0) == 0.25
+
+
+def test_typed_text_types_the_current_word_letter_by_letter():
+    # a word types out over the first 40% of its time, then waits for the next
+    words = (("Every", 1.0), ("light", 0.2), ("is", 0.0))
+    assert typed_text(words) == "Every li"  # 0.2 / 0.4 of "light"
+    assert typed_text((("Every", 1.0), ("light", 0.4))) == "Every light"
+    assert typed_text((("Every", 0.01),)) == "E"  # a started word shows a letter at once
+
+
+def test_typing_knows_when_letters_are_still_coming():
+    from encorelib.codeview import typing
+
+    assert typing((("Every", 1.0), ("light", 0.2)))
+    assert not typing((("Every", 1.0), ("light", 0.5)))  # typed, waiting
+    assert not typing((("Every", 0.0),))

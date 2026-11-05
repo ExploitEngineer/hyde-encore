@@ -17,9 +17,25 @@ class CodeRow(NamedTuple):
     current: bool
 
 
+TYPE_SHARE = 0.4  # a word types out letter by letter over this share of its time
+
+
 def typed_text(words: tuple[tuple[str, float], ...]) -> str:
-    """The words of the current line that have started, as typed so far."""
-    return " ".join(text for text, fill in words if fill > 0.0)
+    """The current line as typed so far: every started word, the newest one
+    letter by letter over the first 40% of its time (a started word shows at
+    least its first letter)."""
+    out = []
+    for text, fill in words:
+        if fill <= 0.0:
+            continue
+        shown = len(text) if fill >= TYPE_SHARE else int(len(text) * fill / TYPE_SHARE)
+        out.append(text[: max(1, shown)])
+    return " ".join(out)
+
+
+def typing(words: tuple[tuple[str, float], ...]) -> bool:
+    """Whether letters are still coming (the code style then draws frames)."""
+    return any(0.0 < fill < TYPE_SHARE for _, fill in words)
 
 
 def code_rows(lines: list[str], index: int, typed: str, rows: int = 6) -> list[CodeRow]:
