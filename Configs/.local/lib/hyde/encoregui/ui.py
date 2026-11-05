@@ -24,6 +24,9 @@ GLASS_FILL = "rgba(28,26,34,0.62)"
 GLASS_FILL_HOVER = "rgba(44,41,52,0.72)"
 GLASS_EDGE = "rgba(255,255,255,0.12)"
 HAIRLINE = "rgba(255,255,255,0.08)"
+ROW_PX = 36  # menu and settings rows, as in the reference panels
+SWATCH_PX = 18  # round color swatches
+SWATCH_RING_ALPHA = 0.45  # their 1 px light ring
 FONT = '"SF Pro Display", "Inter", sans-serif'
 SERIF = '"Instrument Serif", "Noto Serif", serif'
 
@@ -59,10 +62,10 @@ button.pill.on {{ color: #ff6f9c; background: rgba(255,111,156,0.12); }}
 .vsep {{ background: {HAIRLINE}; min-width: 1px; }}
 popover.menu-like > contents {{ background: rgba(26,24,31,0.96); border-radius: 14px; padding: 6px 0;
                               border: 1px solid {GLASS_EDGE}; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }}
-.section {{ font-size: 11px; font-weight: 600; color: {UI_MUTED}; letter-spacing: 0.9px;
-           margin: 10px 14px 2px 14px; }}
+.section {{ font-size: 11px; font-weight: 600; color: {UI_MUTED}; letter-spacing: 0.08em;
+           margin: 12px 14px 4px 14px; }}
 button.item {{ background: transparent; border: none; box-shadow: none; border-radius: 7px;
-              padding: 4px 10px; margin: 0 6px; min-height: 22px; color: {UI_FG}; font-size: 13px;
+              padding: 4px 10px; margin: 0 6px; min-height: {ROW_PX - 8}px; color: {UI_FG}; font-size: 13px;
               transition: background-color 90ms ease-out; }}
 button.item:hover {{ background: #2f6ef7; color: white; }}
 .mark {{ min-width: 14px; color: {UI_FG}; }}
@@ -70,7 +73,13 @@ button.item:hover {{ background: #2f6ef7; color: white; }}
 .row-label {{ font-size: 13px; color: {UI_FG}; }}
 .panel {{ background: rgba(28,26,34,0.96); border-radius: 16px; padding: 16px 18px;
          border: 1px solid {GLASS_EDGE}; box-shadow: 0 24px 60px rgba(0,0,0,0.5); }}
-.panel-title {{ font-size: 11px; font-weight: 600; color: {UI_MUTED}; letter-spacing: 0.9px; }}
+.panel-title {{ font-size: 11px; font-weight: 600; color: {UI_MUTED}; letter-spacing: 0.08em;
+               margin: 4px 0 2px 0; }}
+.panel-row {{ min-height: {ROW_PX}px; }}
+.value {{ font-size: 12px; color: {UI_DIM}; font-feature-settings: "tnum"; }}
+button.swatch {{ padding: 0; min-width: 0; min-height: 0; border-radius: 999px;
+                background: none; border: none; box-shadow: none; }}
+button.swatch:hover {{ background: rgba(255,255,255,0.10); }}
 .dim {{ color: {UI_DIM}; font-size: 12px; }}
 dropdown > button {{ background: rgba(255,255,255,0.08); border: none; box-shadow: none;
                     border-radius: 8px; min-height: 26px; padding: 0 8px; color: {UI_FG}; }}
@@ -108,6 +117,12 @@ menubutton.chip > button:hover {{ background: rgba(255,255,255,0.11); }}
 .fullbar .title {{ font-size: 15px; }} .fullbar .artist {{ font-size: 12px; }}
 .fullbar .time {{ color: rgba(255,255,255,0.75); }}
 """
+
+
+def eyebrow(text: str) -> str:
+    """A section label as the reference panels set it: uppercase (GTK CSS has no
+    text-transform), small and tracked by the .section and .panel-title rules."""
+    return text.upper()
 
 
 def hex_rgb(color: str) -> tuple[float, float, float]:

@@ -9,18 +9,20 @@ Quit). Both write the live look file; every surface follows it at once.
 
 from __future__ import annotations
 
+import math
+
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from encoregui.lyrics import installed_faces
-from encoregui.ui import rgba_hex
+from encoregui.ui import SWATCH_PX, SWATCH_RING_ALPHA, eyebrow, rgba_hex
 from encorelib.look import MAX_SIZE, MIN_SIZE, effective_autostart, effective_players, read_look
 from encorelib.session import player_label
 from encorelib.stream import STYLES
-from encorelib.typeface import ALIASES, DISPLAY_FONTS
+from encorelib.typeface import ALIASES, DISPLAY_FONTS, primary_family
 
 GLOW_ANIMATIONS = ("music", "breathe", "static")
 
@@ -40,7 +42,7 @@ def monitor_names() -> list[str]:
 
 
 def _section(box: Gtk.Box, text: str) -> None:
-    label = Gtk.Label(label=text, xalign=0)
+    label = Gtk.Label(label=eyebrow(text), xalign=0)
     label.add_css_class("section")
     box.append(label)
 
@@ -52,7 +54,8 @@ def _hsep(box: Gtk.Box) -> None:
 
 
 def _panel_row(box: Gtk.Box, label: str, widget: Gtk.Widget) -> None:
-    row = Gtk.Box(spacing=10, margin_top=4, margin_bottom=4)
+    row = Gtk.Box(spacing=10)
+    row.add_css_class("panel-row")
     text = Gtk.Label(label=label, xalign=0)
     text.add_css_class("row-label")
     text.set_hexpand(True)
@@ -61,15 +64,80 @@ def _panel_row(box: Gtk.Box, label: str, widget: Gtk.Widget) -> None:
     box.append(row)
 
 
-def _color_picker(callback) -> Gtk.ColorDialogButton:
-    dialog = Gtk.ColorDialog()
-    dialog.set_with_alpha(False)
-    picker = Gtk.ColorDialogButton.new(dialog)
-    picker.connect("notify::rgba", lambda b, _p: callback(b))
-    return picker
+class Swatch(Gtk.Button):
+    """An 18 px round color swatch with a 1 px light ring that opens the color
+    dialog. GtkColorDialogButton's swatch keeps a 32 px natural width that CSS
+    cannot narrow, so the round is drawn here."""
+
+    def __init__(self, callback):
+        super().__init__()
+        self.add_css_class("swatch")
+        self.set_valign(Gtk.Align.CENTER)
+        self.set_halign(Gtk.Align.START)
+        self.rgba = Gdk.RGBA()
+        self.rgba.parse("#808080")
+        self.callback = callback
+        self.dot = Gtk.DrawingArea()
+        self.dot.set_content_width(SWATCH_PX)
+        self.dot.set_content_height(SWATCH_PX)
+        self.dot.set_draw_func(self._draw)
+        self.set_child(self.dot)
+        self.connect("clicked", lambda *_: self._choose())
+
+    def get_rgba(self) -> Gdk.RGBA:
+        return self.rgba
+
+    def set_rgba(self, rgba: Gdk.RGBA) -> None:
+        self.rgba = rgba
+        self.dot.queue_draw()
+        self.callback(self)
+
+    def _draw(self, _area, cr, width: int, height: int) -> None:
+        radius = min(width, height) / 2
+        cr.arc(width / 2, height / 2, radius - 0.5, 0, 2 * math.pi)
+        cr.set_source_rgba(self.rgba.red, self.rgba.green, self.rgba.blue, 1.0)
+        cr.fill_preserve()
+        cr.set_source_rgba(1, 1, 1, SWATCH_RING_ALPHA)
+        cr.set_line_width(1.0)
+        cr.stroke()
+
+    def _choose(self) -> None:
+        dialog = Gtk.ColorDialog()
+        dialog.set_with_alpha(False)
+        root = self.get_root()
+
+        def done(source, result) -> None:
+            try:
+                picked = source.choose_rgba_finish(result)
+            except GLib.Error:
+                return  # dismissed
+            if picked is not None:
+                self.set_rgba(picked)
+
+        dialog.choose_rgba(root if isinstance(root, Gtk.Window) else None, self.rgba, None, done)
 
 
-def _set_rgba(button: Gtk.ColorDialogButton, color: str) -> None:
+def _color_picker(callback) -> Swatch:
+    return Swatch(callback)
+
+
+def _value_row(box: Gtk.Box, label: str, scale: Gtk.Scale) -> Gtk.Label:
+    """A slider under its caption, the value at the caption's right."""
+    row = Gtk.Box(spacing=8, margin_top=6)
+    caption = Gtk.Label(label=label, xalign=0)
+    caption.add_css_class("row-label")
+    caption.set_hexpand(True)
+    value = Gtk.Label(label=str(int(scale.get_value())), xalign=1)
+    value.add_css_class("value")
+    row.append(caption)
+    row.append(value)
+    box.append(row)
+    box.append(scale)
+    scale.connect("value-changed", lambda s: value.set_label(str(int(s.get_value()))))
+    return value
+
+
+def _set_rgba(button: Swatch, color: str) -> None:
     rgba = Gdk.RGBA()
     rgba.parse(color)
     button.set_rgba(rgba)
@@ -110,10 +178,16 @@ class LookMenu:
             self._item(box, label, lambda *_a, v=value: win.look(gradient=v), ("gradient", value))
         _hsep(box)
         _section(box, "Font")
-        for family in installed_fonts():
-            item = self._item(box, family, lambda *_a, f=family: win.look(font=f), ("font", family))
-            if family in ALIASES:
-                item.set_tooltip_text(f"Where {ALIASES[family]} would be")
+        self.fonts = installed_fonts()
+        self.font = Gtk.DropDown.new_from_strings(self.fonts)
+        self.font.set_margin_start(14)
+        self.font.set_margin_end(14)
+        self.font.set_margin_bottom(4)
+        self.font.set_tooltip_text(
+            "; ".join(f"{ours} stands in for {theirs}" for ours, theirs in ALIASES.items())
+        )
+        self.font.connect("notify::selected", self._on_font)
+        box.append(self.font)
         _hsep(box)
         _section(box, "Text Size")
         size_row = Gtk.Box(spacing=8, margin_start=14, margin_end=10)
@@ -136,13 +210,14 @@ class LookMenu:
         _section(box, "Color")
         auto = {"lyric_color": None, "highlight_color": None, "secondary_color": None}
         self._item(box, "Auto Sync", lambda *_: win.look(**auto), ("auto", None))
-        self.colors: dict[str, Gtk.ColorDialogButton] = {}
+        self.colors: dict[str, Swatch] = {}
         for key, label in (
             ("lyric_color", "Lyric Text..."),
             ("highlight_color", "Highlight..."),
             ("secondary_color", "Secondary Text..."),
         ):
-            row = Gtk.Box(spacing=8, margin_start=12, margin_end=12, margin_top=2, margin_bottom=2)
+            row = Gtk.Box(spacing=10, margin_start=16, margin_end=12)
+            row.add_css_class("panel-row")
             picker = _color_picker(lambda b, k=key: self._on_color(k, b))
             self.colors[key] = picker
             text = Gtk.Label(label=label, xalign=0)
@@ -171,20 +246,24 @@ class LookMenu:
         self.items.append(button)
         return button
 
+    def _on_font(self, dropdown: Gtk.DropDown, _pspec) -> None:
+        index = dropdown.get_selected()
+        if not self.syncing and 0 <= index < len(self.fonts):
+            self.win.look(font=self.fonts[index])
+
     def _on_size(self, scale: Gtk.Scale) -> None:
         value = int(scale.get_value())
         self.size_value.set_label(str(value))
         if not self.syncing:
             self.win.look(size=value)
 
-    def _on_color(self, key: str, button: Gtk.ColorDialogButton) -> None:
+    def _on_color(self, key: str, button: Swatch) -> None:
         if not self.syncing:
             self.win.look(**{key: rgba_hex(button.get_rgba())})
 
     def sync(self) -> None:
         look = read_look(self.win.look_path)
         style = look.get("style", "line")
-        font = look.get("font", "")
         auto = not any(k in look for k in ("lyric_color", "highlight_color", "secondary_color"))
         for item in self.items:
             on = False
@@ -192,7 +271,6 @@ class LookMenu:
                 key, value = item.mark_key
                 on = (
                     (key == "style" and value == style)
-                    or (key == "font" and value == font)
                     or (key == "auto" and auto)
                     or (key == "stage_bg" and value == look.get("stage_bg", "art"))
                     or (key == "gradient" and value == look.get("gradient", 2))
@@ -200,6 +278,11 @@ class LookMenu:
             item.mark.set_label("✓" if on else "")
         self.syncing = True
         try:
+            primary = primary_family(
+                look.get("font") or self.win.cfg.overlay_font, installed_faces()
+            )
+            if primary in self.fonts:
+                self.font.set_selected(self.fonts.index(primary))
             self.size.set_value(look.get("size", 30))
             colors = self.win.colors
             defaults = {
@@ -234,7 +317,7 @@ class SettingsPanel:
         popover.set_child(scroller)
         self.popover = popover
         self.panel = panel
-        title = Gtk.Label(label="encore", xalign=0)
+        title = Gtk.Label(label=eyebrow("Glow"), xalign=0)
         title.add_css_class("panel-title")
         panel.append(title)
 
@@ -255,33 +338,29 @@ class SettingsPanel:
             ("thickness", "Thickness", 40, 220),
             ("intensity", "Glow", 10, 100),
         ):
-            caption = Gtk.Label(label=label, xalign=0)
-            caption.add_css_class("row-label")
-            caption.set_margin_top(6)
-            panel.append(caption)
             scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, 1)
             scale.set_draw_value(False)
             scale.connect(
                 "value-changed", lambda s, a=attr: self._set(**{f"glow_{a}": int(s.get_value())})
             )
             self.scales[attr] = scale
-            panel.append(scale)
+            _value_row(panel, label, scale)
 
         self.override = Gtk.Switch()
         self.override.set_valign(Gtk.Align.CENTER)
         self.override.connect("state-set", lambda _s, on: self._set(glow_override=bool(on)))
         _panel_row(panel, "Override album color", self.override)
-        wheels = Gtk.Box(spacing=16, homogeneous=True, margin_top=4)
-        self.pickers: dict[str, Gtk.ColorDialogButton] = {}
+        wheels = Gtk.Box(spacing=16, homogeneous=True)
+        self.pickers: dict[str, Swatch] = {}
         for key, label in (("glow_primary", "Primary"), ("glow_secondary", "Secondary")):
-            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            caption = Gtk.Label(label=label)
-            caption.add_css_class("dim")
+            col = Gtk.Box(spacing=10)
+            col.add_css_class("panel-row")
+            caption = Gtk.Label(label=label, xalign=0)
+            caption.add_css_class("row-label")
             picker = _color_picker(lambda b, k=key: self._set(**{k: rgba_hex(b.get_rgba())}))
-            picker.set_size_request(-1, 42)
             self.pickers[key] = picker
-            col.append(caption)
             col.append(picker)
+            col.append(caption)
             wheels.append(col)
         panel.append(wheels)
 
@@ -306,7 +385,7 @@ class SettingsPanel:
         _panel_row(panel, "Lock screen lyrics", lock_row)
 
         _hsep(panel)
-        encore_title = Gtk.Label(label="Encore", xalign=0)
+        encore_title = Gtk.Label(label=eyebrow("Encore"), xalign=0)
         encore_title.add_css_class("panel-title")
         panel.append(encore_title)
         self.hd = Gtk.Switch()
