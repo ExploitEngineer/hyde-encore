@@ -337,3 +337,20 @@ def test_column_slot_keeps_a_lone_first_word_in_place():
     assert column_slot(3, 1, 0.5) == 1.5
     assert column_slot(3, 1, 1.1) == pytest.approx(2.1)  # the spring's overshoot
     assert column_slot(5, 0, 1.0) == 3.0  # clamped: gone
+
+
+def test_line_unit_is_bigger_on_the_show_than_on_the_desktop_strip():
+    from encorelib.lyricview import line_unit
+
+    assert line_unit(1080, 30, desktop=True) == 43  # 4% of the height
+    assert line_unit(1080, 30, desktop=False) == 60  # the show: Apple Music sized
+    assert line_unit(1080, 60, desktop=False) == 121
+    assert line_unit(100, 30, desktop=True) == 16  # never unreadable
+
+
+def test_line_x_centers_the_line_on_its_canvas():
+    from encorelib.lyricview import line_x
+
+    assert line_x(1920, 1536) == 192  # the 80% line, centred on Full screen
+    assert line_x(1536, 1536) == 0  # the desktop strip is the line's own width
+    assert line_x(800, 1000) == 0

@@ -50,6 +50,8 @@ from encorelib.lyricview import (
     column_slot,
     current_word_index,
     fit_zoom,
+    line_unit,
+    line_x,
     live_position,
     next_word_boundary,
     should_transition,
@@ -362,6 +364,7 @@ class LyricsEngine:
         self.exit_snapshot: tuple | None = None
         self.last_word_ix: int | None = None
         self.fade_words: tuple[str, ...] = ()  # the words of the line last seen
+        self.line_dx = 0.0
         self.column_visible = False
         self._last_fade_key = ""
         self.places: dict[tuple, list[tuple[float, float]]] = {}
@@ -820,8 +823,9 @@ class LyricsEngine:
         return value
 
     def _line_px(self) -> int:
-        """Line type size: ~4% of the screen height at the default size 30."""
-        return max(16, round(getattr(self, "screen_h", 1080) * 0.040 * self.size / 30))
+        """Line type size: 4% of the screen height on the desktop strip, 5.6%
+        on the Stage and Full screen, at the default size 30 (lyricview.line_unit)."""
+        return line_unit(getattr(self, "screen_h", 1080), self.size, self.desktop)
 
     def _small_raster(self, text: str, alpha_key: str) -> LineRaster | None:
         if not text:
@@ -851,7 +855,7 @@ class LyricsEngine:
     def _paint_line(
         self, sc: Scene, raster: LineRaster, view: View, y: float, alpha: float
     ) -> None:
-        with sc.group(0, y, alpha=alpha):
+        with sc.group(self.line_dx, y, alpha=alpha):
             sc.image(raster.dim_img, 0, 0)
             pad = raster.pad
             full, partial = [], None
@@ -1217,7 +1221,7 @@ class LyricsEngine:
 
     def _draw_cluster(self, sc: Scene, width, height, line_key, texts, ix, now, fade=1.0):
         positions = self._positions(line_key, texts, width, height)
-        unit = self._line_px() * 1.8  # the sung word; ~77 px at 1080p and size 30
+        unit = self._line_px() * 1.8  # the sung word; about 108 px at 1080p and size 30
         lyric, _highlight, secondary = self._trio()
         accent = self.accent_rgb
         # hairlines in the accent, brighter toward the newest word
@@ -1441,6 +1445,7 @@ class LyricsEngine:
             "bottom": float(height - stack),
         }[self.position]
 
+        self.line_dx = line_x(width, raster.width)  # the line sits centred on the canvas
         if self.transition_from is not None:
             age = now - self.transition_from
             eased = ease_out(age / TRANSITION_SECONDS)
@@ -1462,13 +1467,14 @@ class LyricsEngine:
                 img = Image(
                     texture, next_raster.width + 2 * margin, next_raster.height + 2 * margin
                 )
-                sc.image(img, -margin, y - margin, 0.72)
+                # Secondary carries its own dimming
+                sc.image(img, self.line_dx - margin, y - margin)
             else:
-                sc.image(next_raster.dim_img, 0, y, 0.72)
+                sc.image(next_raster.dim_img, self.line_dx, y)
             y += next_raster.height
         if credit_raster:
             y += 4
-            sc.image(credit_raster.dim_img, 0, y, 0.6)
+            sc.image(credit_raster.dim_img, self.line_dx, y, 0.6)
 
     def _credit_expired(self) -> bool:
         self.credit_timer = 0

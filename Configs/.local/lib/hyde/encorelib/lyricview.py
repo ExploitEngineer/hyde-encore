@@ -222,3 +222,19 @@ def column_slot(ix: int, i: int, slide: float) -> float:
     target = ix - i
     before = 1 if (ix == 1 and i == 0) else target - 1
     return max(-1.0, min(3.0, before + (target - before) * slide))
+
+
+LINE_UNIT_DESKTOP = 0.040  # the desktop strip: a line that sits on the wallpaper
+LINE_UNIT_SHOW = 0.056  # the Stage and Full screen: the line is the show
+
+
+def line_unit(height: int, size: int, desktop: bool) -> int:
+    """The line style's type size in px (and the unit the constellation and
+    code styles scale from): a share of the screen height at text size 30."""
+    share = LINE_UNIT_DESKTOP if desktop else LINE_UNIT_SHOW
+    return max(16, round(height * share * size / 30))
+
+
+def line_x(canvas_width: float, line_width: float) -> float:
+    """Where a line raster starts so it sits centred on its canvas."""
+    return max(0.0, (canvas_width - line_width) / 2)
