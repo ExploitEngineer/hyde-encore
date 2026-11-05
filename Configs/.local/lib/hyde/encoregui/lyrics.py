@@ -47,7 +47,6 @@ from encorelib.lyricview import (
     next_word_boundary,
     should_transition,
     stagger,
-    word_style,
 )
 from encorelib.motion import (
     POP_SETTLE,
@@ -60,6 +59,15 @@ from encorelib.motion import (
 )
 from encorelib.palette import wallpaper_palette
 from encorelib.stream import LineDecoder, should_connect
+from encorelib.typeface import (
+    DISPLAY_FONTS,
+    PARTNER_FAMILIES,
+    Faces,
+    face_for,
+    pango_string,
+    primary_family,
+    role_for,
+)
 from encorelib.wordrects import word_byte_ranges
 
 TRANSITION_SECONDS = 0.22
@@ -80,18 +88,44 @@ RASTER_CACHE = 6
 WIDTH_FRACTION = 0.8
 GLYPH_POP_SECONDS = 0.15
 NEXT_LINE_BLUR = 1.5
-_SERIF_FACE: str | None = None
+_FAMILIES: dict | None = None
+_FACES: Faces = {}
+_FACE_STRINGS: dict[tuple[str, str], str] = {}
 
 
-def serif_face() -> str:
-    """The italic serif for column words: Instrument Serif when installed, else the system serif."""
-    global _SERIF_FACE
-    if _SERIF_FACE is None:
-        families = {f.get_name() for f in PangoCairo.FontMap.get_default().list_families()}
-        _SERIF_FACE = (
-            "Instrument Serif Italic" if "Instrument Serif" in families else "Serif Italic"
-        )
-    return _SERIF_FACE
+def installed_faces(wanted: tuple[str, ...] = ()) -> Faces:
+    """The families this system has, with the (weight, italic) faces each ships.
+
+    Every installed name is a key; only the display fonts, the partners and
+    the `wanted` families are described (listing every face of every family
+    costs about 0.2 s here, these few about a hundredth of that).
+    """
+    global _FAMILIES
+    if _FAMILIES is None:
+        _FAMILIES = {f.get_name(): f for f in PangoCairo.FontMap.get_default().list_families()}
+        for name in _FAMILIES:
+            _FACES.setdefault(name, set())
+    for name in (*DISPLAY_FONTS, *PARTNER_FAMILIES, *wanted):
+        family = _FAMILIES.get(name)
+        if family is None or _FACES[name]:
+            continue
+        for face in family.list_faces():
+            if face.is_synthesized():
+                continue
+            desc = face.describe()
+            italic = desc.get_style() != Pango.Style.NORMAL
+            _FACES[name].add((int(desc.get_weight()), italic))
+    return _FACES
+
+
+def face_string(font: str, role: str) -> str:
+    """The Pango description a word in `role` is set in, for the look's font."""
+    key = (font, role)
+    hit = _FACE_STRINGS.get(key)
+    if hit is None:
+        have = installed_faces(tuple(name.strip() for name in font.split(",")))
+        hit = _FACE_STRINGS[key] = pango_string(face_for(role, primary_family(font, have), have))
+    return hit
 
 
 def _hex_rgb(color: str) -> tuple[float, float, float]:
@@ -107,10 +141,11 @@ def _hex_rgb(color: str) -> tuple[float, float, float]:
 def line_layout(
     text: str, font: str, size: int, width: int, align: Pango.Alignment = Pango.Alignment.CENTER
 ) -> Pango.Layout:
-    """The layout every line raster is built from: bold display type, set a
-    little tighter than text type, word-wrapped at width."""
+    """The layout every line raster is built from: the font's heavy face (the
+    boldest it really ships up to Bold), set a little tighter than text type,
+    word-wrapped at width."""
     layout = PangoCairo.create_layout(cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)))
-    desc = Pango.FontDescription.from_string(f"{font} Bold")
+    desc = Pango.FontDescription.from_string(face_string(font, "heavy"))
     desc.set_absolute_size(size * Pango.SCALE)
     layout.set_font_description(desc)
     attrs = Pango.AttrList()
@@ -837,12 +872,12 @@ class LyricsEngine:
                         sc.image(raster.bright_img, 0, 0)
 
     def _word_surface(
-        self, text: str, size: int, rgb, dim: bool, style: str = "bold", shear: float = 0.0
+        self, text: str, size: int, rgb, dim: bool, style: str = "heavy", shear: float = 0.0
     ):
         """A rendered word with baked shadow (and glow when bright).
 
-        style: "bold" (our font), "serif" (italic serif) or "medium".
-        shear bakes a horizontal skew in, so frames can blit 1:1.
+        style: a typeface role (encorelib.typeface): heavy, semibold, medium,
+        serif or mono. shear bakes a horizontal skew in, so frames can blit 1:1.
         """
         key = (text, size, rgb, dim, style, round(shear, 3))
         hit = self.word_cache.get(key)
@@ -851,12 +886,7 @@ class LyricsEngine:
         scale = self.widget.get_scale_factor() or 1
         measure = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
         layout = PangoCairo.create_layout(cairo.Context(measure))
-        if style == "serif":
-            desc = Pango.FontDescription.from_string(serif_face())
-        elif style == "medium":
-            desc = Pango.FontDescription.from_string(self.font + " Medium")
-        else:
-            desc = Pango.FontDescription.from_string(self.font + " Bold")
+        desc = Pango.FontDescription.from_string(face_string(self.font, style))
         desc.set_absolute_size(size * Pango.SCALE)
         layout.set_font_description(desc)
         layout.set_text(text, -1)
@@ -925,9 +955,8 @@ class LyricsEngine:
     SLOT_SCALE: ClassVar[dict] = {-1: 1.0, 0: 1.1, 1: 2.4, 2: 0.85, 3: 0.6}
     SLOT_ALPHA: ClassVar[dict] = {-1: 0.6, 0: 1.0, 1: 1.0, 2: 0.62, 3: 0.0}
 
-    @staticmethod
-    def _word_style(line_key: str, index: int) -> str:
-        return word_style(line_key, index)
+    def _word_style(self, line_key: str, index: int, on_block: bool = False) -> str:
+        return role_for(self.style, line_key, index, on_block)
 
     def _stagger(self, line_key: str, index: int, width: int) -> float:
         return stagger(line_key, index, width)
@@ -1104,7 +1133,12 @@ class LyricsEngine:
             else:
                 rgb, dim = lyric, False
             img, w, h = self._word_surface(
-                texts[i], ref_size, rgb, dim, self._word_style(line_key, i), shear
+                texts[i],
+                ref_size,
+                rgb,
+                dim,
+                self._word_style(line_key, i, current and visual),
+                shear,
             )
             cx = width / 2 + self._stagger(line_key, i, width)
             y = self._slot_y(slot, cy, base)
@@ -1176,10 +1210,12 @@ class LyricsEngine:
             self._paint_word(sc, spark, x, y - past * 1.05, 0.55 * fade)
             older = ix - 1 - i
             rgb = lyric if older < 2 else secondary
-            img, _w, _h = self._word_surface(texts[i], past, rgb, older >= 2)
+            role = self._word_style(line_key, i)
+            img, _w, _h = self._word_surface(texts[i], past, rgb, older >= 2, role)
             self._paint_word(sc, img, x, y, max(0.45, 0.95 - 0.1 * older) * fade)
         if 0 <= ix < len(positions):
-            img, _w, _h = self._word_surface(texts[ix], int(unit), accent, False)
+            role = self._word_style(line_key, ix)
+            img, _w, _h = self._word_surface(texts[ix], int(unit), accent, False, role)
             alpha, zoom = self._pop(now)
             dx, dy = self._drift(now, ix, 1.6)
             x, y = positions[ix][0] + dx, positions[ix][1] + dy

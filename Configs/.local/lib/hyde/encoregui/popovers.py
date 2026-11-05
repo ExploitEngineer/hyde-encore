@@ -9,42 +9,26 @@ Quit). Both write the live look file; every surface follows it at once.
 
 from __future__ import annotations
 
-import subprocess
-
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gtk
 
+from encoregui.lyrics import installed_faces
 from encoregui.ui import rgba_hex
 from encorelib.look import MAX_SIZE, MIN_SIZE, effective_autostart, effective_players, read_look
 from encorelib.session import player_label
 from encorelib.stream import STYLES
+from encorelib.typeface import ALIASES, DISPLAY_FONTS
 
-PREFERRED_FONTS = (
-    "SF Pro Display",
-    "SF Pro Rounded",
-    "Inter",
-    "Helvetica Neue",
-    "Futura",
-    "Didot",
-    "Georgia",
-    "JetBrainsMono Nerd Font",
-)
 GLOW_ANIMATIONS = ("music", "breathe", "static")
 
 
 def installed_fonts() -> list[str]:
-    """The preferred lyric fonts this system actually has."""
-    try:
-        out = subprocess.run(
-            ["fc-list", ":", "family"], capture_output=True, text=True, check=False
-        ).stdout
-    except OSError:
-        return list(PREFERRED_FONTS[:1])
-    have = {name.strip() for line in out.splitlines() for name in line.split(",")}
-    return [f for f in PREFERRED_FONTS if f in have] or list(PREFERRED_FONTS[:1])
+    """The display fonts this system actually has, in the menu's order."""
+    have = installed_faces()
+    return [f for f in DISPLAY_FONTS if f in have] or list(DISPLAY_FONTS[:1])
 
 
 def monitor_names() -> list[str]:
@@ -120,21 +104,25 @@ class LookMenu:
         _hsep(box)
         _section(box, "Font")
         for family in installed_fonts():
-            self._item(box, family, lambda *_a, f=family: win.look(font=f), ("font", family))
+            item = self._item(box, family, lambda *_a, f=family: win.look(font=f), ("font", family))
+            if family in ALIASES:
+                item.set_tooltip_text(f"Where {ALIASES[family]} would be")
         _hsep(box)
         _section(box, "Text Size")
         size_row = Gtk.Box(spacing=8, margin_start=14, margin_end=10)
         self.size = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, MIN_SIZE, MAX_SIZE, 1)
         self.size.set_hexpand(True)
         self.size.set_draw_value(False)
-        self.size.connect(
-            "value-changed",
-            lambda scale: None if self.syncing else win.look(size=int(scale.get_value())),
-        )
+        self.size.connect("value-changed", self._on_size)
+        self.size_value = Gtk.Label(label="30")
+        self.size_value.add_css_class("value")
+        self.size_value.set_width_chars(2)
+        self.size_value.set_xalign(1)
         reset = Gtk.Button(label="Reset")
         reset.add_css_class("pill")
         reset.connect("clicked", lambda *_: win.look(size=None))
         size_row.append(self.size)
+        size_row.append(self.size_value)
         size_row.append(reset)
         box.append(size_row)
         _hsep(box)
@@ -175,6 +163,12 @@ class LookMenu:
         box.append(button)
         self.items.append(button)
         return button
+
+    def _on_size(self, scale: Gtk.Scale) -> None:
+        value = int(scale.get_value())
+        self.size_value.set_label(str(value))
+        if not self.syncing:
+            self.win.look(size=value)
 
     def _on_color(self, key: str, button: Gtk.ColorDialogButton) -> None:
         if not self.syncing:
