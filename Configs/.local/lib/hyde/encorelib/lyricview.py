@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import zlib
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from .timing import GAP_HOLD_SECONDS
 
@@ -174,3 +175,50 @@ def fit_zoom(zoom: float, width: float, room: float) -> float:
     if width <= 0 or width * zoom <= room:
         return zoom
     return room / width
+
+
+class ColumnChange(NamedTuple):
+    pop: bool  # the word being sung pops in
+    slide: bool  # the column pushes up one slot
+    exit: tuple[str, tuple[str, ...], int] | None  # the old line's (key, words, word) leaving
+
+
+def column_change(
+    prev: tuple[str, tuple[str, ...], int | None, bool],
+    key: str,
+    words: tuple[str, ...],
+    ix: int | None,
+    visible: bool,
+    exits: bool,
+) -> ColumnChange | None:
+    """What motion a new view starts in the column and constellation styles.
+
+    `prev` is the line last seen: (key, words, word index, was visible). A new
+    line sends the old one out with its own words, unless it was already
+    hidden (a gap) or the style has no exit; None when nothing changed.
+    """
+    prev_key, prev_words, prev_ix, prev_visible = prev
+    if not visible or (ix, key) == (prev_ix, prev_key):
+        return None
+    exit = None
+    slide = False
+    if key != prev_key:
+        if exits and prev_visible and prev_words and prev_ix is not None and prev_ix >= 0:
+            exit = (prev_key, prev_words, prev_ix)
+    elif ix is not None and prev_ix is not None and ix > prev_ix:
+        slide = True
+    return ColumnChange(ix is not None and ix >= 0, slide, exit)
+
+
+def column_slot(ix: int, i: int, slide: float) -> float:
+    """Where word `i` sits while word `ix` is sung, `slide` (0..1, may overshoot)
+    into the push that `ix` started: 0 sung, 1 just sung (big), 2 before, 3 gone.
+
+    The first word of a line sits alone in the big slot; when the second
+    arrives it stays there instead of dropping back to slide up again.
+    """
+    if ix == 0:
+        return 1.0
+    target = ix - i
+    before = 1 if (ix == 1 and i == 0) else target - 1
+    return max(-1.0, min(3.0, before + (target - before) * slide))

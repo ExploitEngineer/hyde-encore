@@ -46,6 +46,8 @@ from encorelib.lyricview import (
     SLOT_SCALE,
     View,
     build_view,
+    column_change,
+    column_slot,
     current_word_index,
     fit_zoom,
     live_position,
@@ -85,6 +87,7 @@ CREDIT_SECONDS = 10.0
 PULSE_GAP_SECONDS = 4.0  # full screen: a soft note pulses through gaps longer than this
 PULSE_MS = 50
 EXIT_SECONDS = 0.3
+EXIT_RISE = 0.3  # share of the height a finished column rises as it leaves
 GHOST_MIN_PX = 6.0  # a ghost closer than this to its word is not drawn
 COLUMN_CY = 0.42  # the big word's center: the column's larger sung word stays clear of the bar
 FAST_SECONDS = 0.16  # ghosts trail through the first, fast part of a slide
@@ -358,6 +361,8 @@ class LyricsEngine:
         self.exit_from = 0.0
         self.exit_snapshot: tuple | None = None
         self.last_word_ix: int | None = None
+        self.fade_words: tuple[str, ...] = ()  # the words of the line last seen
+        self.column_visible = False
         self._last_fade_key = ""
         self.places: dict[tuple, list[tuple[float, float]]] = {}
         self.decoder = LineDecoder()
@@ -606,28 +611,7 @@ class LyricsEngine:
         else:
             self.transition_from = None
             self.prev_draw = None
-            ix = current_word_index(view) if view.visible else None
-            if view.visible and (ix, view.line_key) != (self.last_word_ix, self._last_fade_key):
-                if (
-                    view.line_key != self._last_fade_key
-                    and self.view.visible
-                    and self.view.words
-                    and self.style != "code"  # code rows move on as text, nothing leaves
-                ):
-                    # line change: let the old cluster fade out as a whole
-                    old_ix = current_word_index(self.view)
-                    self.exit_snapshot = (
-                        self._last_fade_key,
-                        [t for t, _ in self.view.words],
-                        old_ix,
-                    )
-                    self.exit_from = now
-                elif ix is not None and self.last_word_ix is not None and ix > self.last_word_ix:
-                    self.slide_from = now
-                self.last_word_ix = ix
-                self._last_fade_key = view.line_key
-                if ix is not None and ix >= 0:
-                    self.fade_from = now
+            self._track_column(view, now)
             playing = (self.state or {}).get("status") == "playing"
             drifting = self._drifts() and view.visible and playing
             in_motion = self._in_motion(now)
@@ -657,6 +641,25 @@ class LyricsEngine:
 
     def _slide_seconds(self) -> float:
         return SLIDE_SETTLE if self.motion else 0.16
+
+    def _track_column(self, view: View, now: float) -> None:
+        """Start the pop, slide or line exit a new view asks for (lyricview.column_change)."""
+        ix = current_word_index(view) if view.visible else None
+        words = tuple(t for t, _ in view.words)
+        prev = (self._last_fade_key, self.fade_words, self.last_word_ix, self.column_visible)
+        self.column_visible = view.visible
+        change = column_change(prev, view.line_key, words, ix, view.visible, self.style != "code")
+        if change is None:
+            return
+        if change.exit is not None:
+            key, old_words, old_ix = change.exit
+            self.exit_snapshot = (key, list(old_words), old_ix)
+            self.exit_from = now
+        if change.slide:
+            self.slide_from = now
+        if change.pop:
+            self.fade_from = now
+        self.last_word_ix, self._last_fade_key, self.fade_words = ix, view.line_key, words
 
     def _drifts(self) -> bool:
         """Whether this style floats while playing (code stands still: a frame per word)."""
@@ -714,20 +717,7 @@ class LyricsEngine:
             fast = self.transition_from is not None
             continuous = view.animating
         else:
-            ix = current_word_index(view) if view.visible else None
-            if view.visible and (ix, view.line_key) != (self.last_word_ix, self._last_fade_key):
-                # a fast word started inside the previous pop: restart the pop
-                if (
-                    view.line_key == self._last_fade_key
-                    and ix is not None
-                    and self.last_word_ix is not None
-                    and ix > self.last_word_ix
-                ):
-                    self.slide_from = now
-                self.last_word_ix = ix
-                self._last_fade_key = view.line_key
-                if ix is not None and ix >= 0:
-                    self.fade_from = now
+            self._track_column(view, now)
             playing = (self.state or {}).get("status") == "playing"
             if self.exit_snapshot is not None and now - self.exit_from >= EXIT_SECONDS:
                 self.exit_snapshot = None
@@ -1046,7 +1036,7 @@ class LyricsEngine:
                 # its ghosts trailing below it along the same path
                 key, texts, old_ix = self.exit_snapshot
                 trail = ghosts(age / EXIT_SECONDS) if self.motion else []
-                rise = height * 0.16
+                rise = height * EXIT_RISE
                 main = (1.0, -ease_out(age / EXIT_SECONDS) * rise)
                 for lag, alpha in [*reversed(trail), (0.0, 1.0)]:
                     eased = ease_out((age - lag) / EXIT_SECONDS)
@@ -1132,8 +1122,7 @@ class LyricsEngine:
             target = ix - i  # 0 current, 1 previous, 2 two back, 3 leaving
             if alone:
                 target = 1
-            slot = target - 1 + slide if (not alone and slide != 1.0) else target
-            slot = max(-1.0, min(3.0, slot))
+            slot = column_slot(ix, i, slide)
             alpha = self._lerp_slot(self.SLOT_ALPHA, slot) * fade
             if alpha <= (0.05 if ghost else 0.01):
                 continue
@@ -1184,8 +1173,7 @@ class LyricsEngine:
                 if target > 1:  # only the sung word and the big one just sung trail
                     continue
                 main_slide, main_dy = ghost_of
-                main_slot = target - 1 + main_slide if (not alone and main_slide != 1.0) else target
-                main_slot = max(-1.0, min(3.0, main_slot))
+                main_slot = column_slot(ix, i, main_slide)
                 main_y = self._slot_y(main_slot, height * COLUMN_CY + main_dy, base)
                 if abs(y - main_y) < GHOST_MIN_PX:
                     continue

@@ -304,3 +304,36 @@ def test_fit_zoom_keeps_a_word_inside_its_room():
     assert fit_zoom(1.2, 500.0, 900.0) == 1.2  # fits: untouched
     assert fit_zoom(1.2, 1000.0, 900.0) == pytest.approx(0.9)  # 1000 px at 1.2 would be 1200
     assert fit_zoom(1.0, 0.0, 900.0) == 1.0
+
+
+def test_column_change_starts_the_right_motion():
+    from encorelib.lyricview import column_change
+
+    words = ("I", "call", "your")
+    # the next word of the same line: it pops and the column slides
+    c = column_change(("k1", words, 1, True), "k1", words, 2, True, exits=True)
+    assert c.pop and c.slide and c.exit is None
+    # a new line: the old column leaves with ITS words and word, the new one pops
+    c = column_change(("k1", words, 2, True), "k2", ("Every",), 0, True, exits=True)
+    assert c.pop and not c.slide and c.exit == ("k1", words, 2)
+    # after a gap (the old line was hidden) nothing leaves
+    c = column_change(("k1", words, 2, False), "k2", ("Every",), 0, True, exits=True)
+    assert c.exit is None
+    # the code style has no exit; nothing changes, nothing starts
+    assert (
+        column_change(("k1", words, 2, True), "k2", ("Every",), 0, True, exits=False).exit is None
+    )
+    assert column_change(("k1", words, 2, True), "k1", words, 2, True, exits=True) is None
+    assert column_change(("k1", words, 2, True), "k2", (), None, False, exits=True) is None
+
+
+def test_column_slot_keeps_a_lone_first_word_in_place():
+    from encorelib.lyricview import column_slot
+
+    assert column_slot(0, 0, 0.3) == 1.0  # the first word sits big in the middle
+    # the second word arrives: the first stays in the middle, no jump to the bottom
+    assert column_slot(1, 0, 0.0) == 1.0 and column_slot(1, 0, 1.0) == 1.0
+    assert column_slot(1, 1, 0.0) == -1.0 and column_slot(1, 1, 1.0) == 0.0
+    assert column_slot(3, 1, 0.5) == 1.5
+    assert column_slot(3, 1, 1.1) == pytest.approx(2.1)  # the spring's overshoot
+    assert column_slot(5, 0, 1.0) == 3.0  # clamped: gone
