@@ -1148,13 +1148,14 @@ class LyricsEngine:
                 if alpha <= 0.01:
                     continue
             zoom = max(0.05, (base * scale_rel) / ref_size)
-            shear = -0.10 * (target_slot - 1)
-            if current and visual:
-                rgb, dim = self._on_highlight(), False
-            elif current:
+            # the drum tilt follows the slot every frame (a transform, not baked in),
+            # so a word leans smoothly as it rises instead of snapping
+            shear = max(-0.2, min(0.2, -0.10 * (slot - 1)))
+            sung_rgb = self._on_highlight() if visual else _hex_rgb(self._resolved().column_sung)
+            if current:
                 # Highlight (or `color`) when the user picked one; else the readable
                 # accent, since the scheme's highlight is a block fill, too dark bare
-                rgb, dim = _hex_rgb(self._resolved().column_sung), False
+                rgb, dim = sung_rgb, False
             elif slot >= 1.6:
                 rgb, dim = secondary, True
             else:
@@ -1166,9 +1167,19 @@ class LyricsEngine:
                 rgb,
                 dim,
                 self._word_style(line_key, i, current and visual),
-                shear,
+                0.0,
                 word_fill,
             )
+            # the word just sung hands its sung color, face and block over to its
+            # resting look across the slide, instead of switching in one frame
+            handover = 0.0
+            if i == ix - 1 and not ghost and slide < 1.0:
+                handover = 1.0 - max(0.0, min(1.0, slide))
+            was = None
+            if handover > 0.0:
+                was = self._word_surface(
+                    texts[i], ref_size, sung_rgb, False, self._word_style(line_key, i, visual)
+                )
             # a long word never runs past the canvas, in the Stage least of all
             zoom = fit_zoom(zoom, w - 16, width * 0.94)
             cx = width / 2 + self._stagger(line_key, i, width)
@@ -1183,15 +1194,26 @@ class LyricsEngine:
                     continue
             if self.motion and (self.state or {}).get("status") == "playing" and current:
                 cx += 2.0 * math.sin(now * 1.3 + i)
-            with sc.group(cx, y, zoom):
+            with sc.group(cx, y, zoom, skew_x=shear):
+                block_alpha = 0.0
+                block = 1.0
                 if current and visual and not ghost:
+                    block_alpha = 0.92 * alpha
                     block = min(1.0, max(0.18, fill * 1.15))
+                elif visual and handover > 0.0:
+                    block_alpha = 0.92 * alpha * handover  # the block fades as it rises
+                if block_alpha > 0.0:
                     pad_x, pad_y = 10, 4
                     bw = (w - 16 + 2 * pad_x) * block
                     bh = h - 16 + 2 * pad_y
-                    with sc.group(skew_x=-0.18):
-                        sc.rect(-(w - 16) / 2 - pad_x, -bh / 2 + 1, bw, bh, highlight, 0.92 * alpha)
-                sc.image(img, -w / 2, -h / 2, alpha)
+                    with sc.group(skew_x=-0.18 - shear):
+                        sc.rect(-(w - 16) / 2 - pad_x, -bh / 2 + 1, bw, bh, highlight, block_alpha)
+                if was is not None:
+                    wimg, ww, wh = was
+                    sc.image(wimg, -ww / 2, -wh / 2, alpha * handover)
+                    sc.image(img, -w / 2, -h / 2, alpha * (1.0 - handover))
+                else:
+                    sc.image(img, -w / 2, -h / 2, alpha)
                 if visual and slot <= 1.4 and not ghost:
                     glyph = glyph_for(texts[i])
                     if glyph:
@@ -1199,12 +1221,12 @@ class LyricsEngine:
                             glyph, max(14, int(ref_size * 0.62)), highlight, False
                         )
                         # the symbol pops in beside the word it belongs to
-                        pop = (
+                        glyph_pop = (
                             1.0
                             if not current
                             else ease_out((now - self.fade_from) / GLYPH_POP_SECONDS)
                         )
-                        with sc.group(w / 2 - 4 + gw / 2, 0, 0.6 + 0.4 * pop, alpha):
+                        with sc.group(w / 2 - 4 + gw / 2, 0, 0.6 + 0.4 * glyph_pop, alpha):
                             sc.image(gimg, -gw / 2, -gh / 2)
 
     # constellation ------------------------------------------------------------
