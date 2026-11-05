@@ -102,6 +102,13 @@ class LookMenu:
                 box, style.capitalize(), lambda *_a, s=style: win.look(style=s), ("style", style)
             )
         _hsep(box)
+        _section(box, "Background")
+        for value, label in (("art", "Cover"), ("clear", "Clear")):
+            self._item(box, label, lambda *_a, v=value: win.look(stage_bg=v), ("stage_bg", value))
+        _section(box, "Gradient")
+        for value, label in ((1, "1 Color"), (2, "2 Colors")):
+            self._item(box, label, lambda *_a, v=value: win.look(gradient=v), ("gradient", value))
+        _hsep(box)
         _section(box, "Font")
         for family in installed_fonts():
             item = self._item(box, family, lambda *_a, f=family: win.look(font=f), ("font", family))
@@ -187,6 +194,8 @@ class LookMenu:
                     (key == "style" and value == style)
                     or (key == "font" and value == font)
                     or (key == "auto" and auto)
+                    or (key == "stage_bg" and value == look.get("stage_bg", "art"))
+                    or (key == "gradient" and value == look.get("gradient", 2))
                 )
             item.mark.set_label("✓" if on else "")
         self.syncing = True

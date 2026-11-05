@@ -184,3 +184,15 @@ def test_effective_autostart_lets_the_app_override_config():
     assert effective_autostart(EncoreConfig(enable=True), {}) is True
     assert effective_autostart(EncoreConfig(enable=True), {"autostart": False}) is False
     assert effective_autostart(EncoreConfig(enable=False), {"autostart": True}) is True
+
+
+def test_gradient_is_one_or_two_colors(tmp_path):
+    p = tmp_path / "encore.look"
+    update_look(p, gradient=1)
+    assert read_look(p) == {"gradient": 1}
+    update_look(p, gradient=2)
+    assert read_look(p) == {"gradient": 2}
+    update_look(p, gradient=3)
+    update_look(p, gradient=True)
+    update_look(p, gradient="2")
+    assert read_look(p) == {"gradient": 2}

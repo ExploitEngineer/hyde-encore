@@ -24,16 +24,18 @@ from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk
 from encoregui.cover import load_texture
 from encoregui.scene import Image, Scene
 from encoregui.ui import trace
+from encorelib.colors import blob_colors
 from encorelib.motion import blob_center, field_rate, grain_texture_bytes
 
 BLUR = 80
 WASH = 0.68  # black over the blurred cover, so type reads on any art
 BASE = (0.078, 0.075, 0.09)
-# per blob: color key, radius (share of the long side), base center, orbit, periods (s), phase
+# per blob: radius (share of the long side), base center, orbit, periods (s), phase;
+# colors from colors.blob_colors (the accent, or the accent and the second hue)
 BLOBS = (
-    ("accent", 0.52, (0.5, 0.36), (0.05, 0.03), (41.0, 29.0), 0.0),
-    ("accent2", 0.46, (0.2, 0.78), (0.12, 0.08), (53.0, 37.0), 2.1),
-    ("highlight", 0.4, (0.82, 0.72), (0.1, 0.1), (47.0, 31.0), 4.2),
+    (0.52, (0.5, 0.36), (0.05, 0.03), (41.0, 29.0), 0.0),
+    (0.46, (0.2, 0.78), (0.12, 0.08), (53.0, 37.0), 2.1),
+    (0.4, (0.82, 0.72), (0.1, 0.1), (47.0, 31.0), 4.2),
 )
 
 
@@ -50,6 +52,7 @@ class AlbumField(Gtk.Widget):
         self.set_hexpand(True)
         self.set_vexpand(True)
         self.colors = None
+        self.gradient = 2  # the look's `gradient`: blobs in 1 or 2 album colors
         self.path = ""
         self.texture: Gdk.Texture | None = None
         self.blurred: tuple[tuple, Gdk.Texture] | None = None
@@ -73,6 +76,12 @@ class AlbumField(Gtk.Widget):
     def set_colors(self, colors) -> None:
         if colors is not self.colors:  # the scheme is rebuilt only when the palette changes
             self.colors = colors
+            self.queue_draw()
+
+    def set_gradient(self, gradient: int) -> None:
+        if gradient != self.gradient:
+            self.gradient = gradient
+            self.light = None
             self.queue_draw()
 
     def set_cover(self, path: str) -> None:
@@ -180,7 +189,7 @@ class AlbumField(Gtk.Widget):
         """The three blobs rendered at quarter size, once per drift step: a paint then
         costs one texture draw instead of three full-window gradients."""
         fps = max(1, field_rate(self.playing, self.idle))
-        key = (int(t * fps), round(strength, 2), id(self.colors), int(w), int(h))
+        key = (int(t * fps), round(strength, 2), id(self.colors), self.gradient, int(w), int(h))
         if self.light is not None and self.light[0] == key:
             return self.light[1]
         native = self.get_native()
@@ -190,10 +199,10 @@ class AlbumField(Gtk.Widget):
         qw, qh = max(1, int(w / 4)), max(1, int(h / 4))
         snapshot = Gtk.Snapshot()
         side = max(qw, qh)
-        for key_name, size, center, orbit, period, phase in BLOBS:
+        colors = blob_colors(self.colors, self.gradient)
+        for color, (size, center, orbit, period, phase) in zip(colors, BLOBS, strict=True):
             fx, fy = blob_center(t, orbit, period, phase, center)
             radius = side * size
-            color = getattr(self.colors, key_name)
             stops = []
             for offset, alpha in ((0.0, 0.34 * strength), (0.45, 0.14 * strength), (1.0, 0.0)):
                 stop = Gsk.ColorStop()

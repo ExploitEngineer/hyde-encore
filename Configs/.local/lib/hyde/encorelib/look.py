@@ -45,7 +45,7 @@ def _valid(key: str, value) -> bool:
         "glow_secondary",
     ):
         return isinstance(value, str) and bool(_COLOR.match(value))
-    if key == "glow_colors":
+    if key in ("glow_colors", "gradient"):  # gradient: the album field in 1 or 2 colors
         return value in (1, 2) and not isinstance(value, bool)
     if key == "glow_animation":
         return value in GLOW_ANIMATIONS

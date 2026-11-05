@@ -379,11 +379,12 @@ class FullPage(Gtk.Overlay):
     def update(self, state: dict, colors) -> None:
         mode = screen_state(state, time.monotonic())
         self.pages.set_visible_child_name("idle" if mode == "idle" else "show")
-        motion = read_look(self.win.look_path).get("motion", True)
+        look = read_look(self.win.look_path)
         for field in (self.idle_field, self.clear_field):
             field.set_colors(colors)
             field.set_playing(state.get("status") == "playing")
-            field.set_motion(motion)
+            field.set_motion(look.get("motion", True))
+            field.set_gradient(look.get("gradient", 2))
         self.idle_field.set_idle(mode == "idle")  # the clear field holds whenever paused
         set_meta(self.title, self.artist, state)
         self.seek.update(state)

@@ -872,14 +872,23 @@ class LyricsEngine:
                         sc.image(raster.bright_img, 0, 0)
 
     def _word_surface(
-        self, text: str, size: int, rgb, dim: bool, style: str = "heavy", shear: float = 0.0
+        self,
+        text: str,
+        size: int,
+        rgb,
+        dim: bool,
+        style: str = "heavy",
+        shear: float = 0.0,
+        fill: float | None = None,
     ):
         """A rendered word with baked shadow (and glow when bright).
 
         style: a typeface role (encorelib.typeface): heavy, semibold, medium,
         serif or mono. shear bakes a horizontal skew in, so frames can blit 1:1.
+        A dim word has no glow and a 0.55 fill, unless `fill` says otherwise:
+        Secondary words are drawn full, their color already sits behind.
         """
-        key = (text, size, rgb, dim, style, round(shear, 3))
+        key = (text, size, rgb, dim, style, round(shear, 3), fill)
         hit = self.word_cache.get(key)
         if hit is not None:
             return hit
@@ -920,7 +929,7 @@ class LyricsEngine:
             cr2.set_line_width(3.0)
             cr2.stroke()
             cr2.restore()
-        cr2.set_source_rgba(*rgb, 0.55 if dim else 1.0)
+        cr2.set_source_rgba(*rgb, fill if fill is not None else 0.55 if dim else 1.0)
         cr2.move_to(0, 0)
         PangoCairo.show_layout(cr2, layout)
         out = (Image.from_surface(surface, w, h), w, h)
@@ -1132,6 +1141,7 @@ class LyricsEngine:
                 rgb, dim = secondary, True
             else:
                 rgb, dim = lyric, False
+            word_fill = 1.0 if dim else None  # Secondary carries its own dimming
             img, w, h = self._word_surface(
                 texts[i],
                 ref_size,
@@ -1139,6 +1149,7 @@ class LyricsEngine:
                 dim,
                 self._word_style(line_key, i, current and visual),
                 shear,
+                word_fill,
             )
             cx = width / 2 + self._stagger(line_key, i, width)
             y = self._slot_y(slot, cy, base)
@@ -1211,7 +1222,8 @@ class LyricsEngine:
             older = ix - 1 - i
             rgb = lyric if older < 2 else secondary
             role = self._word_style(line_key, i)
-            img, _w, _h = self._word_surface(texts[i], past, rgb, older >= 2, role)
+            fill = 1.0 if older >= 2 else None  # Secondary carries its own dimming
+            img, _w, _h = self._word_surface(texts[i], past, rgb, older >= 2, role, 0.0, fill)
             self._paint_word(sc, img, x, y, max(0.45, 0.95 - 0.1 * older) * fade)
         if 0 <= ix < len(positions):
             role = self._word_style(line_key, ix)

@@ -493,7 +493,9 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.field.set_cover("" if idle else cover_path(state))
         self.field.set_playing(state.get("status") == "playing")
         self.field.set_idle(idle)
-        self.field.set_motion(read_look(self.look_path).get("motion", True))
+        look = read_look(self.look_path)
+        self.field.set_motion(look.get("motion", True))
+        self.field.set_gradient(look.get("gradient", 2))
         self.chip_label.set_label(player_label(state.get("player") or ""))
         self.chip.set_sensitive(bool(state.get("players")))
         for page in (self.home, self.lyrics, self.full):
