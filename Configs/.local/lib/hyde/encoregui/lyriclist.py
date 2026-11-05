@@ -44,7 +44,6 @@ LINE_PX = 26
 GAP = 18
 EDGE_FADE = 90  # px of fade at the top and bottom
 SCROLL_SECONDS = 0.42
-SCROLL_MS = 50  # 20 fps: every repaint of the window costs about 10 ms on this driver
 WORD_FADE = 0.15  # seconds a sung word takes to brighten (three frames)
 FRAME_MS = 50
 HOVER_ALPHA = 0.7
@@ -229,11 +228,11 @@ class LyricList(Gtk.Widget):
             return
         self.scroll_from, self.scroll_to = self.scroll, target
         self.scroll_started = time.monotonic()
-        if not self.scroll_tick:  # 30 fps, not the frame clock: half the repaints
-            self.scroll_tick = GLib.timeout_add(SCROLL_MS, self._on_scroll_tick)
+        if not self.scroll_tick:  # the display's frame clock: a scroll that never judders
+            self.scroll_tick = self.add_tick_callback(self._on_scroll_tick)
 
-    def _on_scroll_tick(self) -> bool:
-        t = (time.monotonic() - self.scroll_started) / SCROLL_SECONDS
+    def _on_scroll_tick(self, _widget, clock) -> bool:
+        t = (clock.get_frame_time() / 1_000_000 - self.scroll_started) / SCROLL_SECONDS
         self.scroll = self.scroll_from + (self.scroll_to - self.scroll_from) * ease_out(t)
         self.queue_draw()
         if t >= 1.0:
@@ -266,7 +265,7 @@ class LyricList(Gtk.Widget):
             return False
         step_px = WHEEL_STEP if controller.get_unit() == Gdk.ScrollUnit.WHEEL else 1.0
         if self.scroll_tick:  # the user takes over from the follow animation
-            GLib.source_remove(self.scroll_tick)
+            self.remove_tick_callback(self.scroll_tick)
             self.scroll_tick = 0
         self.scroll = browse_offset(
             self.scroll, dy * step_px, self.tops, self.heights, self.get_height()
@@ -339,10 +338,13 @@ class LyricList(Gtk.Widget):
         return False
 
     def _stop_timers(self) -> None:
-        for attr in ("anim_id", "wake_id", "scroll_tick", "browse_id"):
+        for attr in ("anim_id", "wake_id", "browse_id"):
             if getattr(self, attr):
                 GLib.source_remove(getattr(self, attr))
                 setattr(self, attr, 0)
+        if self.scroll_tick:
+            self.remove_tick_callback(self.scroll_tick)
+            self.scroll_tick = 0
 
     # pointer ----------------------------------------------------------------
 

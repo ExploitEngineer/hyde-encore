@@ -50,7 +50,6 @@ PAGE_MS = 280  # Home <-> Lyrics
 FULL_ENTER_MS = 220  # the Home cover grows while the compositor goes full screen
 FULL_LEAVE_MS = 240
 FULL_COVER = 400  # the Home cover grows to this on the way into full screen
-TIMELINE_MS = 33
 PAGES = ("home", "lyrics", "stage", "full")
 POPOVERS = ("look", "settings")  # --open names that mean Home with that popover up
 RECONNECT_AFTER = 1.0  # seconds without an answer before saying so
@@ -170,9 +169,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
                 self.unfullscreen()
                 # a hero entry still under way must never finish into Full screen,
                 # and the cover the entry grew goes back to Home's size
-                if self.cover_timer:
-                    GLib.source_remove(self.cover_timer)
-                    self.cover_timer = 0
+                self._stop_cover_timeline()
                 self.home.cover.set_side(ART)
                 self.full.backdrop.cancel_hero()
             self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
@@ -209,14 +206,19 @@ class EncoreWindow(Gtk.ApplicationWindow):
         self.stack.set_visible_child_name("full")
         self.full.backdrop.enter_from(x, y, side, side, done=self.full.enter)
 
-    def _cover_timeline(self, start: int, end: int, ms: int, done) -> None:
-        """Grow or shrink the Home cover over `ms`, then call `done`."""
+    def _stop_cover_timeline(self) -> None:
         if self.cover_timer:
-            GLib.source_remove(self.cover_timer)
+            self.remove_tick_callback(self.cover_timer)
+            self.cover_timer = 0
+
+    def _cover_timeline(self, start: int, end: int, ms: int, done) -> None:
+        """Grow or shrink the Home cover over `ms`, then call `done`; one step per
+        display frame, at the frame's time, so the growth never judders."""
+        self._stop_cover_timeline()
         began = time.monotonic()
 
-        def step() -> bool:
-            t = (time.monotonic() - began) * 1000 / ms
+        def step(_widget, clock) -> bool:
+            t = (clock.get_frame_time() / 1_000_000 - began) * 1000 / ms
             self.home.cover.set_side(int(lerp(start, end, ease_out(t))))
             if t >= 1.0:
                 self.cover_timer = 0
@@ -226,7 +228,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
                 return False
             return True
 
-        self.cover_timer = GLib.timeout_add(TIMELINE_MS, step)
+        self.cover_timer = self.add_tick_callback(step)
 
     def _on_fullscreened(self, *_) -> None:
         trace(f"fullscreened {self.is_fullscreen()}")

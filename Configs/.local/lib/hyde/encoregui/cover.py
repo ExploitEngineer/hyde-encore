@@ -293,14 +293,14 @@ class CoverBackdrop(Gtk.Widget):
                 return False
             return True
 
-        self.hero_timer = GLib.timeout_add(33, tick)
+        self.hero_timer = self.add_tick_callback(lambda *_: tick())  # every display frame
         self.queue_draw()
 
     def cancel_hero(self) -> None:
         """Forget a hero entry under way (the page left before it finished, or we
         left the screen): its done callback never fires."""
         if self.hero_timer:
-            GLib.source_remove(self.hero_timer)
+            self.remove_tick_callback(self.hero_timer)
             self.hero_timer = 0
         self.hero = None
         self.hero_started = 0.0
