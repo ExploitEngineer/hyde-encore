@@ -227,7 +227,8 @@ def test_leaving_full_inside_the_hero_never_enters(lab):
     assert launch_app(lab, "home", "app-home.log").wait(10) == 0
     time.sleep(1.5)
     lines = trace.read_text().splitlines()
-    home = next(i for i, ln in enumerate(lines) if "show_page home" in ln)
+    # the last Home switch is the one that left Full screen (the first is the launch)
+    home = max(i for i, ln in enumerate(lines) if "show_page home" in ln)
     entered = [i for i, ln in enumerate(lines) if "full.enter" in ln]
     if entered and entered[0] < home:
         pytest.skip("the hero finished before the test could leave")
