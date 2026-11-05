@@ -1,4 +1,4 @@
-from encorelib.transport import fmt_time, key_action, seek_to, step_volume
+from encorelib.transport import fmt_time, key_action, page_after, seek_to, step_volume
 
 
 def test_fmt_time():
@@ -49,3 +49,35 @@ def test_ctrl_only_quits():
     assert key_action("q", False, "home") is None
     assert key_action("space", True, "home") is None
     assert key_action("l", True, "home") is None
+
+
+def test_w_key_is_the_stage_everywhere():
+    for page in ("home", "lyrics", "stage", "full"):
+        assert key_action("w", False, page) == key_action("W", False, page) == "stage"
+
+
+def test_lyrics_key_is_off_on_the_stage():
+    assert key_action("l", False, "stage") is None
+    assert key_action("Escape", False, "stage") == "back"
+
+
+def test_page_after_stage_key():
+    assert page_after("stage", "home", "home") == "stage"
+    assert page_after("stage", "lyrics", "lyrics") == "stage"
+    assert page_after("stage", "stage", "home") == "home"
+    assert page_after("stage", "full", "stage") == "stage"
+    assert page_after("stage", "full", "home") == "stage"
+
+
+def test_page_after_fullscreen_key_returns_where_it_came_from():
+    assert page_after("fullscreen", "home", "home") == "full"
+    assert page_after("fullscreen", "stage", "home") == "full"
+    assert page_after("fullscreen", "full", "stage") == "stage"
+    assert page_after("fullscreen", "full", "home") == "home"
+    assert page_after("fullscreen", "full", "lyrics") == "home"
+
+
+def test_page_after_back_is_always_home():
+    assert page_after("back", "stage", "home") == "home"
+    assert page_after("back", "full", "stage") == "home"
+    assert page_after("lyrics", "home", "home") is None  # not a page switch here

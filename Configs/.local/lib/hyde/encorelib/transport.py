@@ -16,11 +16,12 @@ _KEYS = {
     "p": "previous",
     "l": "lyrics",
     "f": "fullscreen",
+    "w": "stage",
     "F11": "fullscreen",
     "Escape": "back",
 }
 # actions that make no sense on a page
-_NOT_ON = {"home": {"back"}, "full": {"lyrics"}, "lyrics": set()}
+_NOT_ON = {"home": {"back"}, "full": {"lyrics"}, "stage": {"lyrics"}, "lyrics": set()}
 
 
 def fmt_time(seconds: float) -> str:
@@ -44,10 +45,27 @@ def step_volume(volume: float, delta: float) -> float:
 
 
 def key_action(key: str, ctrl: bool, page: str) -> str | None:
-    """The action a key press asks for on a page (home, lyrics, full), or None."""
+    """The action a key press asks for on a page (home, lyrics, stage, full), or None."""
     if ctrl:
         return "quit" if key in ("q", "Q") else None
     action = _KEYS.get(key if len(key) > 1 else key.lower())
     if action is None or action in _NOT_ON.get(page, set()):
         return None
     return action
+
+
+def page_after(action: str, page: str, came_from: str) -> str | None:
+    """The page a page-switching action leads to, or None when it switches nothing.
+
+    `came_from` is the page Full screen was entered from: F leaves Full screen
+    back to the Stage when that is where it started, else to Home.
+    """
+    if action == "back":
+        return "home"
+    if action == "stage":
+        return "home" if page == "stage" else "stage"
+    if action == "fullscreen":
+        if page == "full":
+            return "stage" if came_from == "stage" else "home"
+        return "full"
+    return None

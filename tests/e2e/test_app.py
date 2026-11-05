@@ -248,3 +248,29 @@ def test_full_screen_enters_on_a_clear_background(lab):
     assert any("full.enter" in ln for ln in lines), lines[-8:]
     assert (lab.run / "hyde" / "encore.stage").exists()
     app.terminate()
+
+
+def move_lab_window(workspace: str) -> None:
+    """Move the lab's Encore window, by address, without following it."""
+    client = next(c for c in json.loads(hyprctl("clients", "-j")) if c["class"] == LAB_CLASS)
+    hyprctl(
+        "eval",
+        f'hl.dispatch(hl.dsp.window.move({{workspace = "{workspace}", follow = false, '
+        f'window = "address:{client["address"]}"}}))',
+    )
+
+
+def test_stage_flag_follows_the_window(lab):
+    """The Stage hides the desktop overlay only while it is in sight: on a hidden
+    workspace the flag goes, back on screen it returns."""
+    flag = lab.run / "hyde" / "encore.stage"
+    workspace = str(lab.lab.monitor()["activeWorkspace"]["id"])
+    _box, app = open_app(lab, lab.lab, "stage")
+    lab.wait_until(flag.exists, "the stage flag", 5)
+    move_lab_window("special:encorelab")
+    lab.wait_until(lambda: not flag.exists(), "the flag to go off screen", 5)
+    move_lab_window(workspace)
+    lab.wait_until(flag.exists, "the flag to come back", 5)
+    close_window(lab)
+    lab.wait_until(lambda: not flag.exists(), "the flag to go with the window", 10)
+    app.wait(10)

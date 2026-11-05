@@ -41,7 +41,7 @@ from encorelib.screen import screen_state
 from encorelib.service import surface_log
 from encorelib.session import player_label
 from encorelib.single import pid_alive, read_pid
-from encorelib.transport import key_action, step_volume
+from encorelib.transport import key_action, page_after, step_volume
 
 APP_ID = os.environ.get("ENCORE_APP_ID", "org.hyde.encore")
 ENCORE_PY = str(Path(__file__).resolve().parent.parent / "encore.py")
@@ -51,7 +51,7 @@ FULL_ENTER_MS = 220  # the Home cover grows while the compositor goes full scree
 FULL_LEAVE_MS = 240
 FULL_COVER = 400  # the Home cover grows to this on the way into full screen
 TIMELINE_MS = 33
-PAGES = ("home", "lyrics", "full")
+PAGES = ("home", "lyrics", "stage", "full")
 POPOVERS = ("look", "settings")  # --open names that mean Home with that popover up
 RECONNECT_AFTER = 1.0  # seconds without an answer before saying so
 SEEK_STEP = 5
@@ -80,6 +80,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         )
         self.accent_css.load_from_string(accent_rules(self.colors))
         self.page = "home"
+        self.came_from = "home"  # the page Full screen was entered from
         self.silent_since: float | None = None
         self.restarted = False
         self.lock_on = False
@@ -143,19 +144,43 @@ class EncoreWindow(Gtk.ApplicationWindow):
             return
         if name not in PAGES:
             name = "home"
-        leaving_full = self.page == "full" and name != "full"
+        previous = self.page
+        if name == previous and name in ("stage", "full"):
+            return
+        leaving_full = previous == "full" and name != "full"
         self.page = name
         if name == "full":
+            self.came_from = previous
             self.fullscreen()
+            for chrome in (self.header, self.toolbar):
+                chrome.set_visible(False)
+            if previous == "stage":  # the show is already up: it only grows
+                self.full.enter(windowed=False)
+                return
             # the entry moment, without a crossfade (two full-HD offscreens per frame
             # are slow here): the Home cover grows, the page cuts, and the backdrop
             # carries the same cover on to the whole screen, then the lyrics arrive
             self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
             self._cover_timeline(ART, FULL_COVER, FULL_ENTER_MS, self._hero_into_full)
-            self.page = name
+            return
+        if name == "stage":
             for chrome in (self.header, self.toolbar):
                 chrome.set_visible(False)
+            if leaving_full:  # page first: the unfullscreen notify must not send us Home
+                self.unfullscreen()
+                # a hero entry still under way must never finish into Full screen
+                if self.cover_timer:
+                    GLib.source_remove(self.cover_timer)
+                    self.cover_timer = 0
+                    self.home.cover.set_side(ART)
+                self.full.backdrop.cancel_hero()
+            self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+            self.stack.set_transition_duration(PAGE_MS)
+            self.stack.set_visible_child_name("full")
+            self.full.enter(windowed=True)
             return
+        if previous == "stage":
+            self.full.leave()
         if leaving_full:
             self.full.leave()
             self.unfullscreen()
@@ -165,8 +190,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
             self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
             self.stack.set_transition_duration(PAGE_MS)
         self.stack.set_visible_child_name(name)
-        for chrome in (self.header, self.toolbar):  # full screen is the page alone
-            chrome.set_visible(name != "full")
+        for chrome in (self.header, self.toolbar):  # the show is the page alone
+            chrome.set_visible(True)
         if name == "lyrics":
             GLib.timeout_add(260, lambda: (self.lyrics.scroll_to_current(True), False)[1])
 
@@ -203,9 +228,10 @@ class EncoreWindow(Gtk.ApplicationWindow):
 
     def _on_fullscreened(self, *_) -> None:
         trace(f"fullscreened {self.is_fullscreen()}")
-        # the compositor took full screen away (a keybind, another window): never trap
+        # the compositor took full screen away (a keybind, another window): never
+        # trap; back where Full screen was entered from
         if not self.is_fullscreen() and self.page == "full":
-            self.show_page("home")
+            self.show_page("stage" if self.came_from == "stage" else "home")
 
     def toggle_lyrics(self) -> None:
         self.show_page("home" if self.page == "lyrics" else "lyrics")
@@ -309,6 +335,13 @@ class EncoreWindow(Gtk.ApplicationWindow):
         )
         bar.append(
             icon_button(
+                "view-restore-symbolic",
+                lambda *_: self.show_page("stage"),
+                tooltip="Stage window (W)",
+            )
+        )
+        bar.append(
+            icon_button(
                 "view-fullscreen-symbolic",
                 lambda *_: self.show_page("full"),
                 tooltip="Full screen (F)",
@@ -326,7 +359,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
         ):
             self.quit_all()
             return True
-        if self.page == "full":
+        if self.page in ("stage", "full"):
             self.show_page("home")
         app = self.get_application()
         if app is not None and not self.held:
@@ -435,10 +468,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
                 self.set_volume(step_volume(volume, delta))
         elif action == "lyrics":
             self.toggle_lyrics()
-        elif action == "fullscreen":
-            self.show_page("home" if self.page == "full" else "full")
-        elif action == "back":
-            self.show_page("home")
+        elif action in ("fullscreen", "stage", "back"):
+            self.show_page(page_after(action, self.page, self.came_from) or "home")
         elif action == "quit":
             self.quit_all()
         return True

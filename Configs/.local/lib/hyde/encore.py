@@ -634,7 +634,7 @@ def run_glow_toggle() -> int:
     return 0
 
 
-APP_PAGES = ("home", "lyrics", "full", "look", "settings")
+APP_PAGES = ("home", "lyrics", "stage", "full", "look", "settings")
 
 
 def run_app_cmd(page: str | None = None) -> int:

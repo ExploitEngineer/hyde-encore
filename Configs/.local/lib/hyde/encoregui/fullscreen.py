@@ -1,12 +1,16 @@
-"""Full screen: the lyrics big, over the cover or clear black, never a trap.
+"""The show: the lyrics big, over the cover or clear black, never a trap.
 
-The page hosts a LyricsEngine (the same renderer as the desktop overlay)
-over a CoverBackdrop. Moving the mouse shows a top bar (Exit, style,
-background, glow, look) and a bottom bar (cover, song, seek, transport,
-volume); three seconds without motion fade them out and hide the pointer.
-Esc and the Exit button always return to Home. While the page is up it
-writes `encore.stage` with the output it covers, so the desktop overlay on
-that output hides itself.
+One page serves two app pages: Full screen (the window fullscreened, the
+engine sized to its output) and the Stage (the same show in the normal
+window, the engine sized to the window). The page hosts a LyricsEngine (the
+same renderer as the desktop overlay) over a CoverBackdrop. Moving the mouse
+shows a top bar (Home or Exit, Window or Full screen, style, background,
+glow, look) and a bottom bar (cover, song, seek, transport, volume); three
+seconds without motion fade them out and hide the pointer. Esc and the Exit
+button always return to Home. While the show is in sight it writes
+`encore.stage` with the output it is on, so the desktop overlay there hides;
+the flag goes the moment the window is on another workspace, minimized or in
+the tray.
 """
 
 from __future__ import annotations
@@ -26,15 +30,19 @@ from encoregui.glass import GlassPanel
 from encoregui.home import SeekBar, Transport, VolumeControl, cover_path, meta_labels, set_meta
 from encoregui.lyrics import LyricsEngine
 from encoregui.popovers import build_look_menu
-from encoregui.ui import icon_button, trace
+from encoregui.ui import icon_button, icon_image, set_icon, trace
 from encorelib.look import read_look
 from encorelib.screen import field_shows, screen_state
 from encorelib.stageflag import render as render_flag
+from encorelib.stageflag import stage_size, wanted
 from encorelib.stream import STYLES
 
 STAGE_FLAG = "encore.stage"
 HIDE_AFTER_MS = int(os.environ.get("ENCORE_FULL_HIDE_MS", "3000"))  # tests keep the bars up
 BAR_FADE_MS = 200
+RESIZE_SETTLE_MS = 120  # the Stage engine re-lays its type once a resize settles
+FULL_SEEK_PX = 420
+STAGE_SEEK_PX = 240
 
 
 class FullPage(Gtk.Overlay):
@@ -47,6 +55,13 @@ class FullPage(Gtk.Overlay):
         self.stage_path = os.path.join(win.runtime_dir, STAGE_FLAG)
         self.style_buttons: dict[str, Gtk.Button] = {}
         self.monitor_handler = 0
+        self.windowed = False  # the Stage: the show inside the normal window
+        self.connector = "*"  # the output the window is on; "*" until known
+        self.allocation = (0, 0)
+        self.resize_timer = 0
+        # the flag follows the window: another workspace or the tray hides nothing
+        for signal in ("notify::suspended", "map", "unmap"):
+            win.connect(signal, lambda *_: self.sync_flag())
 
         # what is shown: the show (field, backdrop and lyrics) or the idle field
         self.show = Gtk.Overlay()
@@ -71,6 +86,12 @@ class FullPage(Gtk.Overlay):
         self.pages.add_named(self.show, "show")
         self.pages.add_named(self.idle, "idle")
         self.set_child(self.pages)
+        # GTK 4 has no size signal on an overlay: a drawing area that draws
+        # nothing reports the page's size as it changes (the Stage follows it)
+        probe = Gtk.DrawingArea()
+        probe.set_can_target(False)
+        probe.connect("resize", self._on_resize)
+        self.add_overlay(probe)
 
         self.top = self._revealer(self._build_top(), Gtk.Align.START)
         self.bottom = self._revealer(self._build_bottom(), Gtk.Align.END)
@@ -118,17 +139,32 @@ class FullPage(Gtk.Overlay):
             getattr(bar, f"set_margin_{side}")(10)
         bar.set_margin_start(14)
         bar.set_margin_end(14)
-        exit_button = Gtk.Button()
-        exit_button.add_css_class("pill")
+        self.exit_button = Gtk.Button()
+        self.exit_button.add_css_class("pill")
         box = Gtk.Box(spacing=6)
         close = Gtk.Image.new_from_icon_name("window-close-symbolic")
         close.set_pixel_size(14)
         box.append(close)
-        box.append(Gtk.Label(label="Exit full screen"))
-        exit_button.set_child(box)
-        exit_button.set_tooltip_text("Back to the window (Esc)")
-        exit_button.connect("clicked", lambda *_: self.win.show_page("home"))
-        bar.append(exit_button)
+        self.exit_label = Gtk.Label(label="Exit full screen")
+        box.append(self.exit_label)
+        self.exit_button.set_child(box)
+        self.exit_button.set_tooltip_text("Back to Home (Esc)")
+        self.exit_button.connect("clicked", lambda *_: self.win.show_page("home"))
+        bar.append(self.exit_button)
+        # Full screen <-> the Stage window, the show carrying on
+        self.mode_button = Gtk.Button()
+        self.mode_button.add_css_class("pill")
+        mode_box = Gtk.Box(spacing=6)
+        self.mode_icon = icon_image("view-restore-symbolic")
+        self.mode_icon.set_pixel_size(14)
+        mode_box.append(self.mode_icon)
+        self.mode_label = Gtk.Label(label="Window")
+        mode_box.append(self.mode_label)
+        self.mode_button.set_child(mode_box)
+        self.mode_button.connect(
+            "clicked", lambda *_: self.win.show_page("full" if self.windowed else "stage")
+        )
+        bar.append(self.mode_button)
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
         bar.append(spacer)
@@ -179,7 +215,7 @@ class FullPage(Gtk.Overlay):
         middle = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         middle.set_hexpand(True)
         middle.set_valign(Gtk.Align.CENTER)
-        self.seek = SeekBar(self.win, width=420)
+        self.seek = SeekBar(self.win, width=FULL_SEEK_PX)
         self.transport = Transport(self.win)
         middle.append(self.seek)
         middle.append(self.transport)
@@ -217,13 +253,16 @@ class FullPage(Gtk.Overlay):
 
     # life cycle ---------------------------------------------------------------
 
-    def enter(self) -> None:
-        """Start drawing: a fresh engine sized to the output the window is on."""
-        trace("full.enter")
+    def enter(self, windowed: bool = False) -> None:
+        """Start drawing, or switch between Full screen and the Stage while drawing:
+        the engine sizes to the output (Full screen) or to this page (Stage)."""
+        trace(f"full.enter windowed={windowed}")
+        self._set_windowed(windowed)
         if self.engine is None:
             self.engine = LyricsEngine(self.win.cfg, self.win.runtime_dir, desktop=False)
             self.engine.on_style_changed = lambda _s: self._sync_look()
             self.canvas_holder.add_overlay(self.engine.widget)
+        self.engine.set_windowed(windowed)
         self.engine.set_suspended(False)
         # the compositor says which output the window is on, possibly after a
         # move: follow its enter-monitor events and size the engine to that output
@@ -231,17 +270,66 @@ class FullPage(Gtk.Overlay):
         if surface is not None and not self.monitor_handler:
             self.monitor_handler = surface.connect("enter-monitor", self._on_enter_monitor)
         self._on_enter_monitor(surface, self._monitor())
+        if windowed:
+            self._fit_to_page()
         self._wake()
 
+    def _set_windowed(self, windowed: bool) -> None:
+        self.windowed = windowed
+        self.exit_label.set_label("Home" if windowed else "Exit full screen")
+        self.mode_label.set_label("Full screen" if windowed else "Window")
+        set_icon(
+            self.mode_icon, "view-fullscreen-symbolic" if windowed else "view-restore-symbolic"
+        )
+        # the bottom bar fits the window: a shorter seek bar and song column
+        self.seek.scale.set_size_request(STAGE_SEEK_PX if windowed else FULL_SEEK_PX, -1)
+        for label in (self.title, self.artist):
+            label.set_width_chars(16 if windowed else 22)
+            label.set_max_width_chars(16 if windowed else 22)
+        self.mode_button.set_tooltip_text(
+            "Fill the screen (F)" if windowed else "Back to the Stage window (W)"
+        )
+
     def _on_enter_monitor(self, _surface, monitor: Gdk.Monitor | None) -> None:
-        if self.win.page != "full":
+        if self.win.page not in ("stage", "full"):
             return
-        if monitor is not None:
+        if monitor is not None and self.engine is not None and not self.windowed:
             geometry = monitor.get_geometry()
-            if self.engine is not None:
-                self.engine.set_screen(geometry.width, geometry.height)
+            self.engine.set_screen(geometry.width, geometry.height)
         # "*" hides every desktop overlay until the output is known
-        self._write_flag(monitor.get_connector() if monitor is not None else "*")
+        self.connector = monitor.get_connector() if monitor is not None else "*"
+        self.sync_flag()
+
+    def _on_resize(self, _probe, width: int, height: int) -> None:
+        if (width, height) == self.allocation:
+            return
+        self.allocation = (width, height)
+        if self.windowed and self.engine is not None:
+            # a drag resizes many times a second: lay the type out once it settles
+            if self.resize_timer:
+                GLib.source_remove(self.resize_timer)
+            self.resize_timer = GLib.timeout_add(RESIZE_SETTLE_MS, self._resize_settled)
+
+    def _resize_settled(self) -> bool:
+        self.resize_timer = 0
+        self._fit_to_page()
+        return False
+
+    def _fit_to_page(self) -> None:
+        if self.engine is None or not self.windowed:
+            return
+        width, height = self.allocation
+        if width <= 0 or height <= 0:
+            return  # not allocated yet: the probe's first resize lays it out
+        trace(f"full.fit {width}x{height}")
+        self.engine.set_screen(*stage_size(width, height))
+
+    def sync_flag(self) -> None:
+        """Hold the flag while the show is in sight, drop it the moment it is not."""
+        if wanted(self.win.page, self.win.get_mapped(), self.win.is_suspended()):
+            self._write_flag(self.connector)
+        else:
+            self.clear_flag()
 
     def leave(self) -> None:
         """Stop drawing and let the desktop overlay back."""
@@ -251,6 +339,9 @@ class FullPage(Gtk.Overlay):
         if self.hide_timer:
             GLib.source_remove(self.hide_timer)
             self.hide_timer = 0
+        if self.resize_timer:
+            GLib.source_remove(self.resize_timer)
+            self.resize_timer = 0
         surface = self.win.get_surface()
         if surface is not None and self.monitor_handler:
             surface.disconnect(self.monitor_handler)

@@ -331,6 +331,7 @@ class LyricsEngine:
         self.on_runtime_file: Callable[[str], None] | None = None
 
         self.widget = _Canvas(self.render)
+        self.windowed = False  # the Stage: the canvas fills a resizable window
         self.screen_w, self.screen_h = 0, 0
         self.set_screen(1920, 1080)
         self._watch_runtime_dir()
@@ -350,10 +351,17 @@ class LyricsEngine:
         self.layout_canvas()
         self.widget.queue_draw()
 
+    def set_windowed(self, windowed: bool) -> None:
+        """In the Stage the canvas fills the page: a size request there would
+        stop the window from shrinking."""
+        if windowed != self.windowed:
+            self.windowed = windowed
+            self.layout_canvas()
+
     def layout_canvas(self) -> None:
-        """Column styles draw in a centered region, so frames repaint less;
-        the others fill their window."""
-        if self.style in ("stack", "visual"):
+        """Column styles draw in a centered region on a fixed screen, so frames
+        repaint less; the others, and every style in the Stage, fill their window."""
+        if self.style in ("stack", "visual") and not self.windowed:
             self.widget.set_halign(Gtk.Align.CENTER)
             self.widget.set_valign(Gtk.Align.CENTER)
             self.widget.set_size_request(int(self.screen_w * 0.8), int(self.screen_h * 0.8))
