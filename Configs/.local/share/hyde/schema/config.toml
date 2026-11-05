@@ -27,7 +27,7 @@ size = 30  # Font size of the current line in pixels.
 next_line = true  # Show the dimmed next line under the current one.
 color = ""  # Color of sung words, e.g. "#CAAAF0". Empty uses the album accent.
 monitor = ""  # Monitor connector to show on, e.g. "eDP-1". Empty follows the compositor.
-style = "line"  # Overlay style: line (karaoke strip), stack (rolling word column), constellation (word chain) or visual (album art with the rolling column).
+style = "line"  # Overlay style: line (karaoke strip), stack (rolling word column), constellation (word chain), visual (album art with the rolling column) or code (lines typed out like code).
 
 # 'hyde-shell encore hyprlock' configuration.
 [encore.hyprlock]

@@ -22,7 +22,7 @@ from encoregui.ui import SWATCH_PX, SWATCH_RING_ALPHA, eyebrow, rgba_hex
 from encorelib.look import MAX_SIZE, MIN_SIZE, effective_autostart, effective_players, read_look
 from encorelib.session import player_label
 from encorelib.stream import STYLES
-from encorelib.typeface import ALIASES, DISPLAY_FONTS, primary_family
+from encorelib.typeface import ALIASES, DISPLAY_FONTS, menu_fonts, primary_family
 
 GLOW_ANIMATIONS = ("music", "breathe", "static")
 
@@ -281,8 +281,11 @@ class LookMenu:
             primary = primary_family(
                 look.get("font") or self.win.cfg.overlay_font, installed_faces()
             )
-            if primary in self.fonts:
-                self.font.set_selected(self.fonts.index(primary))
+            fonts = menu_fonts(self.fonts, primary)
+            if fonts != self.fonts:  # a family set from the CLI joins the menu
+                self.font.get_model().append(primary)
+                self.fonts = fonts
+            self.font.set_selected(self.fonts.index(primary))
             self.size.set_value(look.get("size", 30))
             colors = self.win.colors
             defaults = {

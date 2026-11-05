@@ -128,3 +128,10 @@ def pango_string(face: Face) -> str:
     """A Pango font description string for a face."""
     word = _WEIGHT_WORD.get(face.weight, "Normal")
     return f"{face.family} {word}{' Italic' if face.italic else ''}"
+
+
+def menu_fonts(shown: list[str], current: str) -> list[str]:
+    """The Font menu's families: the installed display set, plus the family in
+    use when it is another one (set from the CLI), so the menu never shows a
+    font the surfaces are not using."""
+    return shown if current in shown else [*shown, current]

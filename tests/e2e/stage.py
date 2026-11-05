@@ -185,7 +185,7 @@ def look_value(raw: str):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--style", default="line", help="line, stack, constellation, visual")
+    parser.add_argument("--style", default="line", help="line, stack, constellation, visual, code")
     parser.add_argument("--at", default="2.9,5.0,7.7,12.4,14.4", help="seconds to capture")
     parser.add_argument("--look", action="append", default=[], help="look key=value")
     parser.add_argument("--glow", action="store_true", help="also run the edge glow")

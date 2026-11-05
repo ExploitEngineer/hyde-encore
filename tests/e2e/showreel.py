@@ -61,15 +61,16 @@ LINE_SECONDS = 2.2
 # (style and text size) through the look file, as the menus write them
 SHOTS = [
     (0.0, "page", "home"),
-    (2.4, "page", "stage"),
-    (6.6, "page", "full"),
-    (10.8, "look", {"style": "stack"}),
-    (14.6, "look", {"style": "constellation", "size": 32}),
-    (17.8, "look", {"style": "line", "size": 50}),
-    (20.8, "look", {"style": "code", "size": 30}),
-    (23.8, "look", {"style": "visual", "size": 30}),
+    (1.8, "page", "lyrics"),
+    (4.4, "page", "stage"),
+    (8.0, "page", "full"),
+    (12.0, "look", {"style": "stack"}),
+    (15.8, "look", {"style": "constellation", "size": 32}),
+    (19.0, "look", {"style": "line", "size": 50}),
+    (22.0, "look", {"style": "code", "size": 30}),
+    (25.0, "look", {"style": "visual", "size": 30}),
 ]
-TAKE_SECONDS = 27.0
+TAKE_SECONDS = 28.2
 
 
 def stamp(seconds: float) -> str:

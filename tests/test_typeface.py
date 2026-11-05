@@ -107,3 +107,12 @@ def test_display_fonts_and_their_reference_names():
         "Maple Mono",
     )
     assert ALIASES == {"Newsreader": "New York", "Instrument Serif": "Didot"}
+
+
+def test_menu_fonts_show_the_family_in_use():
+    from encorelib.typeface import menu_fonts
+
+    shown = ["SF Pro Display", "Inter"]
+    assert menu_fonts(shown, "Inter") == shown
+    # an installed family set outside the menu (from the CLI) joins the list
+    assert menu_fonts(shown, "Noto Sans") == ["SF Pro Display", "Inter", "Noto Sans"]

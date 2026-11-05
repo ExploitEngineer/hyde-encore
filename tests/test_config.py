@@ -159,3 +159,13 @@ def test_glow_monitor(tmp_path):
     assert load_config(env=HOME, env_file=tmp_path / "x").glow_monitor == ""
     env = {**HOME, "ENCORE_GLOW_MONITOR": "HDMI-A-1"}
     assert load_config(env=env, env_file=tmp_path / "x").glow_monitor == "HDMI-A-1"
+
+
+def test_schema_and_config_document_every_style():
+    from encorelib.stream import STYLES
+
+    schema = Path(__file__).resolve().parent.parent / "Configs/.local/share/hyde/schema"
+    for name in ("schema.toml", "config.toml"):
+        line = next(ln for ln in (schema / name).read_text().splitlines() if "Overlay style:" in ln)
+        for style in STYLES:
+            assert style in line, (name, style)

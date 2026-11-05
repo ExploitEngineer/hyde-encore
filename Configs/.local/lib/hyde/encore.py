@@ -940,7 +940,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("toggle", help="show or hide the lyrics overlay")
     glow = sub.add_parser("glow", help="toggle the screen-edge glow")
     glow.add_argument("--run", action="store_true", help="run the glow process in the foreground")
-    style = sub.add_parser("style", help="switch the overlay style (line, stack, constellation)")
+    style = sub.add_parser(
+        "style", help="switch the lyric style (line, stack, constellation, visual, code)"
+    )
     style.add_argument("name", nargs="?", default="next", help="style name, or 'next' to cycle")
     look = sub.add_parser(
         "look", help="change the overlay look live (font, size, color, next-line, reset)"
