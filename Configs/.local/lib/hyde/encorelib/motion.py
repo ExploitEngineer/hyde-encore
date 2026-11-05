@@ -36,7 +36,7 @@ def lerp(a: float, b: float, t: float) -> float:
 
 
 PLAIN_SECONDS = 0.16  # motion off: every pop and slide is this plain ease-out
-GHOST_LAGS = (0.055, 0.110)  # seconds behind the moving word, along its own path
+GHOST_LAGS = (0.03, 0.06)  # seconds behind the moving word: close echoes read as motion blur
 GHOST_ALPHAS = (0.35, 0.18)
 POP_SETTLE = 0.32  # a new word's pop
 SLIDE_SETTLE = 0.24  # the column pushing up

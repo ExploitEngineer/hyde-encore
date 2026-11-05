@@ -98,7 +98,7 @@ def test_spring_final_approach_is_monotonic():
 def test_ghosts_swell_mid_slide_and_vanish_when_settled():
     assert ghosts(0.0) == [] and ghosts(1.0) == [] and ghosts(1.4) == [] and ghosts(-0.2) == []
     mid = ghosts(0.5)
-    assert [lag for lag, _ in mid] == [0.055, 0.110]
+    assert [lag for lag, _ in mid] == [0.03, 0.06]  # close echoes read as motion blur
     assert mid[0][1] == pytest.approx(0.35) and mid[1][1] == pytest.approx(0.18)
     assert ghosts(0.1)[0][1] < mid[0][1]
     assert len(ghosts(0.5, count=1)) == 1
