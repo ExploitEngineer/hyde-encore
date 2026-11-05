@@ -32,6 +32,7 @@ from gi.repository import Gio, GLib, Graphene, Gtk, Pango, PangoCairo
 from encoregui.scene import Image, Scene
 from encoregui.ui import trace
 from encorelib.bytecache import ByteLRU
+from encorelib.codeview import code_rows, typed_text
 from encorelib.colors import resolve
 from encorelib.colors import scheme as color_scheme
 from encorelib.config import EncoreConfig
@@ -80,7 +81,8 @@ PULSE_GAP_SECONDS = 4.0  # full screen: a soft note pulses through gaps longer t
 PULSE_MS = 50
 EXIT_SECONDS = 0.3
 GHOST_MIN_PX = 6.0  # a ghost closer than this to its word is not drawn
-FAST_SECONDS = 0.16  # the first, fast part of a pop or slide runs at 30 fps; tails at 15
+FAST_SECONDS = 0.16
+CODE_ROWS = 6  # the code style: five past lines and the one being typed  # the first, fast part of a pop or slide runs at 30 fps; tails at 15
 COLUMN_ROWS = 3
 CONSTELLATION_SCALE = 1.2
 PAST_SCALE = 0.55
@@ -598,7 +600,12 @@ class LyricsEngine:
             self.prev_draw = None
             ix = current_word_index(view) if view.visible else None
             if view.visible and (ix, view.line_key) != (self.last_word_ix, self._last_fade_key):
-                if view.line_key != self._last_fade_key and self.view.visible and self.view.words:
+                if (
+                    view.line_key != self._last_fade_key
+                    and self.view.visible
+                    and self.view.words
+                    and self.style != "code"  # code rows move on as text, nothing leaves
+                ):
                     # line change: let the old cluster fade out as a whole
                     old_ix = current_word_index(self.view)
                     self.exit_snapshot = (
@@ -614,7 +621,7 @@ class LyricsEngine:
                 if ix is not None and ix >= 0:
                     self.fade_from = now
             playing = (self.state or {}).get("status") == "playing"
-            drifting = self.motion and view.visible and playing
+            drifting = self._drifts() and view.visible and playing
             in_motion = self._in_motion(now)
             active = view.visible and (in_motion or drifting)
             wake = next_word_boundary(self.state, now) if view.visible else None
@@ -643,8 +650,14 @@ class LyricsEngine:
     def _slide_seconds(self) -> float:
         return SLIDE_SETTLE if self.motion else 0.16
 
+    def _drifts(self) -> bool:
+        """Whether this style floats while playing (code stands still: a frame per word)."""
+        return self.motion and self.style != "code"
+
     def _in_motion(self, now: float) -> bool:
         """A pop, a slide (and its ghosts) or a line's exit is under way."""
+        if self.style == "code":
+            return False
         return (
             (now - self.fade_from) < self._pop_seconds()
             or (now - self.slide_from) < self._slide_seconds()
@@ -698,7 +711,7 @@ class LyricsEngine:
             if self.exit_snapshot is not None and now - self.exit_from >= EXIT_SECONDS:
                 self.exit_snapshot = None
             moving = self._in_motion(now)
-            drifting = self.motion and view.visible and playing
+            drifting = self._drifts() and view.visible and playing
             still = moving or drifting
             fast = (
                 (now - self.fade_from) < FAST_SECONDS
@@ -1254,6 +1267,44 @@ class LyricsEngine:
 
     # credit, card -------------------------------------------------------------
 
+    # code ----------------------------------------------------------------------
+
+    def _draw_code(self, sc: Scene, width, height, view: View) -> None:
+        """Past lines as comments, the current one typed word by word, a block caret."""
+        state = self.state or {}
+        lines = [ln.get("text") or "" for ln in ((state.get("lyrics") or {}).get("lines") or [])]
+        index = int((state.get("line") or {}).get("index", 0))
+        rows = code_rows(lines, index, typed_text(view.words), CODE_ROWS)
+        lyric, _highlight, secondary = self._trio()
+        caret = _hex_rgb(self._resolved().sung)
+        size = int(self._line_px() * 0.9)
+        number_size = max(10, int(size * 0.8))
+        row_h = size * 1.75
+        left = width * 0.1
+        text_x = left + number_size * 2.6  # a gutter for three digits
+        for k, row in enumerate(rows):
+            back = len(rows) - 1 - k  # rows above the current one
+            y = height * 0.6 - back * row_h
+            alpha = 1.0 if row.current else max(0.3, 0.8 - 0.1 * back)
+            number, nw, nh = self._word_surface(
+                str(row.number), number_size, secondary, True, "mono", 0.0, 1.0
+            )
+            sc.image(number, text_x - number_size * 0.9 - (nw - 16) - 8, y - nh / 2, alpha)
+            typed_w = 0.0
+            if row.text:
+                rgb = lyric if row.current else secondary
+                fill = None if row.current else 1.0  # Secondary carries its own dimming
+                img, w, h = self._word_surface(
+                    row.text, size, rgb, not row.current, "mono", 0.0, fill
+                )
+                sc.image(img, text_x - 8, y - h / 2, alpha)
+                typed_w = w - 16
+            if row.current:
+                gap = size * 0.18 if row.text else 0.0
+                sc.rect(
+                    text_x + typed_w + gap, y - size * 0.55, size * 0.56, size * 1.1, caret, 0.9
+                )
+
     def _draw_credit(self, sc: Scene, width, height) -> None:
         credit = self._credit_text()
         if not credit:
@@ -1344,6 +1395,10 @@ class LyricsEngine:
             return
         if self.style in ("stack", "visual"):
             self._draw_rolling(sc, width, height, view)
+            self._draw_credit(sc, width, height)
+            return
+        if self.style == "code":
+            self._draw_code(sc, width, height, view)
             self._draw_credit(sc, width, height)
             return
         if self.style == "constellation":
