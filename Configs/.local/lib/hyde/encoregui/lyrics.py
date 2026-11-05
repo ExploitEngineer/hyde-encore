@@ -1289,10 +1289,11 @@ class LyricsEngine:
     # constellation ------------------------------------------------------------
 
     def _positions(self, line_key: str, words: list[str], width, height):
-        key = (line_key, width, height)
+        word_px = self._line_px() * 1.8  # the sung word's size, as _draw_cluster sets it
+        key = (line_key, width, height, word_px)
         hit = self.places.get(key)
         if hit is None:
-            hit = chain_words(words, width, height, seed=line_key)
+            hit = chain_words(words, width, height, seed=line_key, word_px=word_px)
             self.places[key] = hit
             while len(self.places) > 8:
                 self.places.pop(next(iter(self.places)))
