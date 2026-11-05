@@ -43,7 +43,8 @@ Current shape: Encore is an app (DECISIONS #29) with its own identity (#35); the
 - The standalone (non-HyDE) app; built so it stays possible.
 
 ## Next
-- Owner's run on the real screen (launcher, Spotify, Home, Lyrics, Full screen, idle, tray in waybar, lock preview) and the owner's verdict on the identity; fix what is off before anything new.
+- The stage pass (owner's verdict 2026-11-05: the desktop overlay follows every workspace, the reference runs its animation in a black gradient window with popping motion, our fonts all look the same, everything from windows to settings and colors must be perfect): design in `docs/superpowers/specs/2026-11-05-encore-stage-design.md`, the session prompt in `docs/superpowers/plans/2026-11-05-encore-stage-prompt.md`. Order: Stage window, springs and ghosts, per-style typography, gradient and color floor, settings pass, `code` style if time allows.
+- Owner's full run on the real screen after that (desktop lyrics confirmed running 2026-11-05 03:20; Full screen, tray in waybar, lock preview still unseen).
 - Per-frame pipeline cut: lower rates for the drift loop and the gap pulse first, then a native profiler (owner's OK to install perf or sysprof).
 - Upstream: Discussion, then small PRs (hyprlock.sh symlink and player fixes, start_up.lua hc.start iteration, encore).
 
