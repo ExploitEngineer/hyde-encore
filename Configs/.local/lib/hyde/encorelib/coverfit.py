@@ -35,3 +35,14 @@ def fit_cover(img_w: int, img_h: int, view_w: float, view_h: float, scale: float
     s = min(FRAME_MAX / scale, FRAME_SHARE * view_w / img_w, FRAME_SHARE * view_h / img_h)
     w, h = img_w * s, img_h * s
     return CoverFit("framed", (view_w - w) / 2, (view_h - h) / 2, w, h)
+
+
+HOME_ART_SHARE = 0.4  # of the Home page's height
+HOME_ART_RANGE = (256, 480)
+
+
+def home_art(page_height: int) -> int:
+    """Home's cover side for a page height: 256 px in the default window,
+    growing with a tall or tiled window, capped so it never turns into a poster."""
+    low, high = HOME_ART_RANGE
+    return max(low, min(high, round(page_height * HOME_ART_SHARE)))

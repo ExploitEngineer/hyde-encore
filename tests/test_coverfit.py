@@ -30,3 +30,12 @@ def test_fit_uses_device_pixels():
 def test_fit_without_an_image():
     f = fit_cover(0, 0, 1920, 1080)
     assert (f.w, f.h) == (0, 0)
+
+
+def test_home_art_grows_with_the_window():
+    from encorelib.coverfit import home_art
+
+    assert home_art(630) == 256  # the default 960x760 window: as before
+    assert home_art(870) == 348  # a 1280x1000 window
+    assert home_art(5000) == 480  # never a poster
+    assert home_art(0) == 256  # not laid out yet

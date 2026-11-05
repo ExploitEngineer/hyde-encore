@@ -64,7 +64,7 @@ SHOTS = [
     (2.4, "page", "stage"),
     (6.6, "page", "full"),
     (10.8, "look", {"style": "stack"}),
-    (14.6, "look", {"style": "constellation", "size": 38}),
+    (14.6, "look", {"style": "constellation", "size": 32}),
     (17.8, "look", {"style": "line", "size": 50}),
     (20.8, "look", {"style": "code", "size": 30}),
     (23.8, "look", {"style": "visual", "size": 30}),

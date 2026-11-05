@@ -289,5 +289,6 @@ def test_home_cover_is_back_to_size_after_full_then_stage(lab):
     assert launch_app(lab, "home", "app-home.log").wait(10) == 0
     lab.wait_until(lambda: "show_page home from stage" in trace.read_text(), "home", 10)
     sides = [ln.split()[-1] for ln in trace.read_text().splitlines() if "home cover" in ln]
-    assert sides[-1] == "256", sides
+    # Home's own size (256 px or a little more in this window), never the entry's 400
+    assert 256 <= int(sides[-1]) < 300, sides
     app.terminate()

@@ -22,6 +22,7 @@ from gi.repository import Gio, GLib, Gtk
 from encoregui.cover import CoverView
 from encoregui.lyriclist import LyricList
 from encoregui.ui import icon_button, icon_image, set_icon
+from encorelib.coverfit import home_art
 from encorelib.journal import read_lines
 from encorelib.lyricview import live_position
 from encorelib.screen import lookup_reason, pick_music_apps, screen_state
@@ -287,7 +288,16 @@ class HomePage(Gtk.Stack):
         self.expanded = 0.0  # 0..1 cover hover expansion
         self.expand_target = 0.0
         self.expand_timer = 0
-        self.add_named(self._build_player(win), "player")
+        self.art = ART  # the cover's side for this window (coverfit.home_art)
+        # the player page in an overlay with a probe that reports its size:
+        # the cover grows with a tall or tiled window
+        player = Gtk.Overlay()
+        player.set_child(self._build_player(win))
+        probe = Gtk.DrawingArea()
+        probe.set_can_target(False)
+        probe.connect("resize", lambda _p, _w, h: self._fit_art(h))
+        player.add_overlay(probe)
+        self.add_named(player, "player")
         self.add_named(self._build_idle(win), "idle")
 
     def _build_player(self, win) -> Gtk.Widget:
@@ -369,6 +379,19 @@ class HomePage(Gtk.Stack):
         self.cover.set_path(cover_path(state))
         self.cover.set_alpha(PAUSED_ALPHA if state.get("status") == "paused" else 1.0)
 
+    def _fit_art(self, page_height: int) -> None:
+        # the show fills the window or the screen while Home sits hidden behind
+        # it; its size then says nothing about Home's
+        if self.win.page not in ("home", "lyrics"):
+            return
+        art = home_art(page_height)
+        if art == self.art:
+            return
+        self.art = art
+        # the hover and the entry into Full screen animate the cover themselves
+        if not self.expand_timer and not self.expanded and not self.win.cover_timer:
+            self.cover.set_side(art)
+
     def _expand(self, target: float) -> None:
         self.expand_target = target
         if not self.expand_timer:
@@ -381,7 +404,8 @@ class HomePage(Gtk.Stack):
         else:
             self.expanded = max(self.expand_target, self.expanded - step)
         eased = 1 - (1 - self.expanded) ** 3
-        self.cover.set_side(int(ART + (ART_EXPANDED - ART) * eased))
+        expanded = self.art * ART_EXPANDED / ART
+        self.cover.set_side(int(self.art + (expanded - self.art) * eased))
         self.win.field.set_hover(eased)
         if self.expanded == self.expand_target:
             self.expand_timer = 0

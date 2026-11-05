@@ -25,7 +25,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 
 from encoregui.field import AlbumField
 from encoregui.fullscreen import FullPage
-from encoregui.home import ART, HomePage, LyricsPage, cover_path
+from encoregui.home import HomePage, LyricsPage, cover_path
 from encoregui.popovers import build_look_menu, build_settings_popover
 from encoregui.tray import Tray
 from encoregui.ui import accent_rules, hex_rgb, icon_button, icon_image, install_css, trace
@@ -160,7 +160,9 @@ class EncoreWindow(Gtk.ApplicationWindow):
             # are slow here): the Home cover grows, the page cuts, and the backdrop
             # carries the same cover on to the whole screen, then the lyrics arrive
             self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
-            self._cover_timeline(ART, FULL_COVER, FULL_ENTER_MS, self._hero_into_full)
+            self._cover_timeline(
+                self.home.art, max(FULL_COVER, self.home.art), FULL_ENTER_MS, self._hero_into_full
+            )
             return
         if name == "stage":
             for chrome in (self.header, self.toolbar):
@@ -170,7 +172,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
                 # a hero entry still under way must never finish into Full screen,
                 # and the cover the entry grew goes back to Home's size
                 self._stop_cover_timeline()
-                self.home.cover.set_side(ART)
+                self.home.cover.set_side(self.home.art)
                 self.full.backdrop.cancel_hero()
             self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
             self.stack.set_transition_duration(PAGE_MS)
@@ -183,7 +185,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
             self.full.leave()
             self.unfullscreen()
             self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
-            self._cover_timeline(FULL_COVER, ART, FULL_LEAVE_MS, None)
+            self._cover_timeline(max(FULL_COVER, self.home.art), self.home.art, FULL_LEAVE_MS, None)
         else:
             self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
             self.stack.set_transition_duration(PAGE_MS)
@@ -197,7 +199,7 @@ class EncoreWindow(Gtk.ApplicationWindow):
     def _hero_into_full(self) -> None:
         """Cut to the full page and let its backdrop grow the cover from where Home had it."""
         ok, bounds = self.home.cover.compute_bounds(self.stack)
-        side = FULL_COVER
+        side = max(FULL_COVER, self.home.art)
         if ok and self.page == "full" and self.stack.get_visible_child() is self.home:
             x = bounds.get_x() + (bounds.get_width() - side) / 2
             y = bounds.get_y() + (bounds.get_height() - side) / 2
