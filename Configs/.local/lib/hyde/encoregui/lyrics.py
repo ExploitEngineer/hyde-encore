@@ -1278,8 +1278,8 @@ class LyricsEngine:
     def _draw_code(self, sc: Scene, width, height, view: View) -> None:
         """Past lines as comments, the current one typed word by word, a block caret.
 
-        The block shrinks as one (codeview.fit_scale) when its widest row, the
-        whole current line included, would run past the right edge.
+        The block sits centred and shrinks as one (codeview.fit_scale) when
+        its widest row, the whole current line included, would not fit.
         """
         state = self.state or {}
         lines = [ln.get("text") or "" for ln in ((state.get("lyrics") or {}).get("lines") or [])]
@@ -1290,7 +1290,7 @@ class LyricsEngine:
         size = int(self._line_px() * 0.9)
         number_size = max(10, int(size * 0.8))
         row_h = size * 1.75
-        text_x = width * 0.1 + number_size * 2.6  # a gutter for three digits
+        gutter = number_size * 2.6  # room for three digits
         caret_w = size * 0.56
         drawn = []
         for row in rows:
@@ -1307,7 +1307,10 @@ class LyricsEngine:
         widths = [s[1] - 16 for _r, s in drawn if s is not None]
         if full is not None:
             widths.append(full[1] - 16 + size * 0.18 + caret_w)
-        scale = fit_scale(widths, width - text_x - width * 0.05)
+        # the block (gutter and widest row) sits centred, shrunk as one to fit
+        total = gutter + max(widths, default=0.0)
+        scale = fit_scale([total], width * 0.9)
+        text_x = line_x(width, total * scale) + gutter * scale
         with sc.group(text_x, height * 0.6, scale):
             for k, (row, surface) in enumerate(drawn):
                 back = len(rows) - 1 - k  # rows above the current one

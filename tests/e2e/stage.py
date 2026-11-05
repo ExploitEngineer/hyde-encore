@@ -143,7 +143,9 @@ def launch_app(h: Harness, page: str, log: str = "app.log") -> subprocess.Popen:
     return h._spawn([sys.executable, str(LIB / "encore.py"), "app", "--open", page], log)
 
 
-def open_app(h: Harness, lab: Lab, page: str) -> tuple[tuple[int, int, int, int], subprocess.Popen]:
+def open_app(
+    h: Harness, lab: Lab, page: str, size: str = "960 760"
+) -> tuple[tuple[int, int, int, int], subprocess.Popen]:
     """Open the Encore window on the lab monitor; abort at once if it maps anywhere else."""
     monitor = lab.monitor()
     print(
@@ -153,7 +155,7 @@ def open_app(h: Harness, lab: Lab, page: str) -> tuple[tuple[int, int, int, int]
             'hl.window_rule({name = "encore_lab_player", '
             'match = {class = "^org\\\\.hyde\\\\.encore\\\\.lab$"}, '
             f'workspace = "{monitor["activeWorkspace"]["id"]} silent", '
-            'float = true, center = true, size = "960 760", '
+            f'float = true, center = true, size = "{size}", '
             'opacity = "1.0 override 1.0 override"})',
         ),
     )
