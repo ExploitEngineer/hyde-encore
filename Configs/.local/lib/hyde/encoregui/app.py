@@ -118,7 +118,8 @@ class EncoreWindow(Gtk.ApplicationWindow):
         # capture phase: Space pauses even when a just-clicked button has focus
         key.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         key.connect("key-pressed", self._on_key)
-        key.connect("key-released", lambda _c, keyval, *_: self.held_keys.release(str(keyval)))
+        # held keys by hardware keycode: Shift changes the keyval between press and release
+        key.connect("key-released", lambda _c, _keyval, code, _state: self.held_keys.release(code))
         # a release lost to a focus change must never swallow the next press
         self.connect("notify::is-active", lambda *_: self.held_keys.down.clear())
         self.add_controller(key)
@@ -460,12 +461,12 @@ class EncoreWindow(Gtk.ApplicationWindow):
         pid = read_pid(Path(self.runtime_dir) / name)
         return pid is not None and pid_alive(pid)
 
-    def _on_key(self, _ctl, keyval, _code, state) -> bool:
+    def _on_key(self, _ctl, keyval, code, state) -> bool:
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
         action = key_action(Gdk.keyval_name(keyval) or "", ctrl, self.page)
         if action is None:
             return False
-        if not self.held_keys.press(str(keyval), action):
+        if not self.held_keys.press(code, action):
             return True  # auto-repeat of a key that acts once per press
         if action == "play-pause":
             self.ctl("play-pause")

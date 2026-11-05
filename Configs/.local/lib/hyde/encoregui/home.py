@@ -21,7 +21,7 @@ from gi.repository import Gio, GLib, Gtk
 
 from encoregui.cover import CoverView
 from encoregui.lyriclist import LyricList
-from encoregui.ui import icon_button, icon_image, set_icon
+from encoregui.ui import icon_button, icon_image, set_icon, trace
 from encorelib.coverfit import home_art, lyrics_card
 from encorelib.journal import read_lines
 from encorelib.lyricview import live_position
@@ -292,7 +292,7 @@ class HomePage(Gtk.Stack):
         # the player page in an overlay with a probe that reports its size:
         # the cover grows with a tall or tiled window
         player = Gtk.Overlay()
-        player.set_child(self._build_player(win))
+        player.set_child(_unconstrained(self._build_player(win)))
         probe = Gtk.DrawingArea()
         probe.set_can_target(False)
         probe.connect("resize", lambda _p, _w, h: self._fit_art(h))
@@ -413,6 +413,16 @@ class HomePage(Gtk.Stack):
         return True
 
 
+def _unconstrained(child: Gtk.Widget) -> Gtk.Widget:
+    """Hold content sized from the window without making that size the window's
+    minimum: a scrolled window with hidden scrollbars measures small, so a tile
+    change can always shrink the window and the probe then shrinks the content."""
+    scroller = Gtk.ScrolledWindow()
+    scroller.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.EXTERNAL)
+    scroller.set_child(child)
+    return scroller
+
+
 class LyricsPage(Gtk.Box):
     def __init__(self, win):
         super().__init__()
@@ -430,7 +440,7 @@ class LyricsPage(Gtk.Box):
         card.set_valign(Gtk.Align.CENTER)
         card.set_size_request(*lyrics_card(0, 0))
         self.card = card
-        holder.set_child(card)
+        holder.set_child(_unconstrained(card))
         probe = Gtk.DrawingArea()
         probe.set_can_target(False)
         probe.connect("resize", lambda _p, w, h: self._fit_card(w, h))
@@ -484,6 +494,7 @@ class LyricsPage(Gtk.Box):
         card.append(self.right)
 
     def _fit_card(self, width: int, height: int) -> None:
+        trace(f"lyrics page {width}x{height}")
         if self.win.page not in ("home", "lyrics"):
             return  # the show is up; its size says nothing about this page's
         size = lyrics_card(width, height)

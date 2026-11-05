@@ -292,3 +292,37 @@ def test_home_cover_is_back_to_size_after_full_then_stage(lab):
     # Home's own size (256 px or a little more in this window), never the entry's 400
     assert 256 <= int(sides[-1]) < 300, sides
     app.terminate()
+
+
+def resize_lab_window(width: int, height: int) -> None:
+    client = next(c for c in json.loads(hyprctl("clients", "-j")) if c["class"] == LAB_CLASS)
+    hyprctl(
+        "eval",
+        f"hl.dispatch(hl.dsp.window.resize({{x = {width}, y = {height}, exact = true, "
+        f'window = "address:{client["address"]}"}}))',
+    )
+
+
+def lab_window_size() -> tuple[int, int]:
+    client = next(c for c in json.loads(hyprctl("clients", "-j")) if c["class"] == LAB_CLASS)
+    return tuple(client["size"])
+
+
+def test_a_grown_window_shrinks_back(lab):
+    """Home's cover and the Lyrics card grow with the window; their size must
+    never become the window's minimum, or a tile change could not shrink it."""
+    trace = lab.tmp / "trace.log"
+    lab.env["ENCORE_TRACE"] = str(trace)
+    _box, app = open_app(lab, lab.lab, "lyrics", size="1600 1000")
+    time.sleep(1.5)  # the probes have sized the card for the big window
+    resize_lab_window(900, 700)
+    lab.wait_until(lambda: lab_window_size() == (900, 700), "the window to shrink", 5)
+    time.sleep(1.0)
+
+    def page_width() -> int:
+        sizes = [ln.split()[-1] for ln in trace.read_text().splitlines() if "lyrics page" in ln]
+        return int(sizes[-1].split("x")[0])
+
+    # GTK lays the page out at the window's new width, not at a raised minimum
+    assert page_width() <= 900
+    app.terminate()

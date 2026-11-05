@@ -80,13 +80,13 @@ class HeldKeys:
     volume keep repeating while the key is held."""
 
     def __init__(self) -> None:
-        self.down: set[str] = set()
+        self.down: set[object] = set()
 
-    def press(self, key: str, action: str) -> bool:
+    def press(self, key: object, action: str) -> bool:
         """Whether this key-press event should act."""
         repeat = key in self.down
         self.down.add(key)
         return not (repeat and action in ONCE_PER_PRESS)
 
-    def release(self, key: str) -> None:
+    def release(self, key: object) -> None:
         self.down.discard(key)

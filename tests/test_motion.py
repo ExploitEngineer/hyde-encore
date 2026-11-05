@@ -143,6 +143,9 @@ def test_should_draw_follows_the_display_up_to_the_cap():
     assert not should_draw(1 / 144, 1 / 60) and should_draw(2 / 144, 1 / 60)
     # a late refresh draws at once
     assert should_draw(0.05, 1 / 60)
+    # 90 Hz panel: springs draw on every refresh rather than every other (45 fps)
+    assert should_draw(1 / 90, 1 / 60)
+    assert not should_draw(1 / 90, 1 / 30) and should_draw(3 / 90, 1 / 30)
 
 
 def test_frame_source_uses_the_display_clock_only_for_springs():

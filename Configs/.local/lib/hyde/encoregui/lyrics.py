@@ -567,6 +567,8 @@ class LyricsEngine:
     # scheduling ------------------------------------------------------------
 
     def apply(self) -> None:
+        if self.closed:
+            return  # an apply queued before shutdown must not start a frame source
         now = time.monotonic()
         palette = (self.state or {}).get("palette") or {}
         if palette != self._accent_palette:
@@ -752,7 +754,7 @@ class LyricsEngine:
         if self.style == "code":
             return False
         playing = (self.state or {}).get("status") == "playing"
-        if self.style == "visual" and self.view.visible and playing:
+        if self.motion and self.style == "visual" and self.view.visible and playing:
             ix = current_word_index(self.view)
             if ix >= 0 and block_moving(self.view.words[ix][1]):
                 return True  # the Highlight block sweeps across its word

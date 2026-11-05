@@ -83,7 +83,7 @@ def pop_in(age: float, motion: bool) -> tuple[float, float]:
 
 FAST_FPS = 60  # pops, slides and exits
 SLOW_FPS = 30  # the drift and fill sweeps
-FRAME_SLACK = 0.004  # frame times jitter; a refresh this early still counts
+FRAME_SLACK = 0.006  # frame times jitter; a refresh this early still counts (90 Hz: 11.1 ms)
 
 
 def frame_interval(fast: bool, continuous: bool) -> float:

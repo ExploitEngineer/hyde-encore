@@ -216,28 +216,30 @@ def main() -> int:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        time.sleep(0.6)  # the recorder is rolling
-        began = time.monotonic()
-        h.ctl(PLAYER, "play")
-        cuts = []
-        frame = "window"
-        for at, kind, value in SHOTS:
-            while time.monotonic() - began < at:
-                time.sleep(0.01)
-            if kind == "page":
-                if value != "home":
-                    launch_app(h, value, f"app-{value}.log").wait(10)
-                frame = "full" if value == "full" else "window"
-            else:
-                update_look(look, **value)
-            shot = value if isinstance(value, str) else value["style"]
-            cuts.append(
-                {"at": round(time.monotonic() - began + 0.6, 3), "frame": frame, "shot": shot}
-            )
-        while time.monotonic() - began < TAKE_SECONDS:
-            time.sleep(0.05)
-        rec.send_signal(signal.SIGINT)
-        rec.wait(15)
+        try:
+            time.sleep(0.6)  # the recorder is rolling
+            began = time.monotonic()
+            h.ctl(PLAYER, "play")
+            cuts = []
+            frame = "window"
+            for at, kind, value in SHOTS:
+                while time.monotonic() - began < at:
+                    time.sleep(0.01)
+                if kind == "page":
+                    if value != "home":
+                        launch_app(h, value, f"app-{value}.log").wait(10)
+                    frame = "full" if value == "full" else "window"
+                else:
+                    update_look(look, **value)
+                shot = value if isinstance(value, str) else value["style"]
+                cuts.append(
+                    {"at": round(time.monotonic() - began + 0.6, 3), "frame": frame, "shot": shot}
+                )
+            while time.monotonic() - began < TAKE_SECONDS:
+                time.sleep(0.05)
+        finally:  # never leave the recorder running on the lab output
+            rec.send_signal(signal.SIGINT)
+            rec.wait(15)
         app.terminate()
         # the recording began 0.6 s before the take's clock; the first shot starts there
         cuts[0]["at"] = 0.6
