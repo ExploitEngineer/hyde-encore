@@ -40,10 +40,14 @@ from encorelib.constellation import chain_words
 from encorelib.glyphs import glyph_for
 from encorelib.look import effective, read_look
 from encorelib.lyricview import (
+    COLUMN_BASE,
     HIDDEN,
+    SLOT_ALPHA,
+    SLOT_SCALE,
     View,
     build_view,
     current_word_index,
+    fit_zoom,
     live_position,
     next_word_boundary,
     should_transition,
@@ -82,6 +86,7 @@ PULSE_GAP_SECONDS = 4.0  # full screen: a soft note pulses through gaps longer t
 PULSE_MS = 50
 EXIT_SECONDS = 0.3
 GHOST_MIN_PX = 6.0  # a ghost closer than this to its word is not drawn
+COLUMN_CY = 0.42  # the big word's center: the column's larger sung word stays clear of the bar
 FAST_SECONDS = 0.16  # ghosts trail through the first, fast part of a slide
 CODE_ROWS = 6  # the code style: five past lines and the one being typed
 COLUMN_ROWS = 3
@@ -981,8 +986,8 @@ class LyricsEngine:
     # bottom = the word being sung (visual: on a sweeping Highlight marker),
     # middle = the word just sung, big; top = the word before, small.
 
-    SLOT_SCALE: ClassVar[dict] = {-1: 1.0, 0: 1.1, 1: 2.4, 2: 0.85, 3: 0.6}
-    SLOT_ALPHA: ClassVar[dict] = {-1: 0.6, 0: 1.0, 1: 1.0, 2: 0.62, 3: 0.0}
+    SLOT_SCALE: ClassVar[dict] = SLOT_SCALE
+    SLOT_ALPHA: ClassVar[dict] = SLOT_ALPHA
 
     def _word_style(self, line_key: str, index: int, on_block: bool = False) -> str:
         return role_for(self.style, line_key, index, on_block)
@@ -1010,9 +1015,9 @@ class LyricsEngine:
         return _hex_rgb(self._resolved().on_highlight)
 
     def _column_base(self, height: int) -> float:
-        """Column font unit: ~8% of the screen height at the default size,
-        so the middle word lands near the reference's ~20% of the height."""
-        return getattr(self, "screen_h", height) * 0.08 * (self.size / 30.0)
+        """Column font unit: a tenth of the screen height at the default size
+        (lyricview.COLUMN_BASE), as Verci's hero sets it."""
+        return getattr(self, "screen_h", height) * COLUMN_BASE * (self.size / 30.0)
 
     def _slot_y(self, slot: float, cy: float, base: float) -> float:
         # distance between slot centers from the two word heights involved
@@ -1118,7 +1123,7 @@ class LyricsEngine:
         """
         ghost = ghost_of is not None
         lyric, highlight, secondary = self._trio()
-        cy = height * 0.47 + dy
+        cy = height * COLUMN_CY + dy
         base = self._column_base(height)
         visual = self.style == "visual"
         alone = ix == 0  # first word of a line sits big in the middle
@@ -1171,6 +1176,8 @@ class LyricsEngine:
                 shear,
                 word_fill,
             )
+            # a long word never runs past the canvas, in the Stage least of all
+            zoom = fit_zoom(zoom, w - 16, width * 0.94)
             cx = width / 2 + self._stagger(line_key, i, width)
             y = self._slot_y(slot, cy, base)
             if ghost_of is not None:
@@ -1179,7 +1186,7 @@ class LyricsEngine:
                 main_slide, main_dy = ghost_of
                 main_slot = target - 1 + main_slide if (not alone and main_slide != 1.0) else target
                 main_slot = max(-1.0, min(3.0, main_slot))
-                main_y = self._slot_y(main_slot, height * 0.47 + main_dy, base)
+                main_y = self._slot_y(main_slot, height * COLUMN_CY + main_dy, base)
                 if abs(y - main_y) < GHOST_MIN_PX:
                     continue
             if self.motion and (self.state or {}).get("status") == "playing" and current:

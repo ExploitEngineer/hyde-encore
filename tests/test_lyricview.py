@@ -286,3 +286,21 @@ def test_lead_lights_words_a_touch_early():
     assert abs(next_word_boundary(state, now=100.0) - (11.0 - 9.9 - LEAD_SECONDS)) < 1e-6
     early = dict(state, position=9.7)
     assert current_word_index(build_view(early, now=100.0)) == -1
+
+
+def test_column_slots_follow_the_reference_proportions():
+    from encorelib.lyricview import COLUMN_BASE, SLOT_SCALE
+
+    # the word being sung sits nearly as big as the word just sung (Verci's hero:
+    # about 0.8), the word before it small; the column unit is a tenth of the height
+    assert 0.75 <= SLOT_SCALE[0] / SLOT_SCALE[1] <= 0.85
+    assert SLOT_SCALE[2] < SLOT_SCALE[0] < SLOT_SCALE[1]
+    assert COLUMN_BASE == pytest.approx(0.10)
+
+
+def test_fit_zoom_keeps_a_word_inside_its_room():
+    from encorelib.lyricview import fit_zoom
+
+    assert fit_zoom(1.2, 500.0, 900.0) == 1.2  # fits: untouched
+    assert fit_zoom(1.2, 1000.0, 900.0) == pytest.approx(0.9)  # 1000 px at 1.2 would be 1200
+    assert fit_zoom(1.0, 0.0, 900.0) == 1.0

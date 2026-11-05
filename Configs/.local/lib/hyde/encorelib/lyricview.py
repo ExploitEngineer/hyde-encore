@@ -157,3 +157,20 @@ def word_style(line_key: str, index: int) -> str:
 def stagger(line_key: str, index: int, width: float) -> float:
     """Horizontal zig-zag of a column word, up to 2.5% of the width each way."""
     return (_stable_unit(line_key, "x", index) - 0.5) * width * 0.05
+
+
+# The rolling column (stack and visual): slot -1 is the word arriving from
+# below, 0 the word being sung (on visual's Highlight block), 1 the word just
+# sung, big, 2 the word before it, 3 leaving. Read off Verci's hero frames:
+# the sung word is about 0.8 of the big one, and the unit is a tenth of the
+# screen height at the default text size.
+SLOT_SCALE = {-1: 1.2, 0: 1.9, 1: 2.4, 2: 0.85, 3: 0.6}
+SLOT_ALPHA = {-1: 0.6, 0: 1.0, 1: 1.0, 2: 0.62, 3: 0.0}
+COLUMN_BASE = 0.10
+
+
+def fit_zoom(zoom: float, width: float, room: float) -> float:
+    """The zoom a word of `width` px is drawn at so it never exceeds `room` px."""
+    if width <= 0 or width * zoom <= room:
+        return zoom
+    return room / width
