@@ -46,3 +46,19 @@ def home_art(page_height: int) -> int:
     growing with a tall or tiled window, capped so it never turns into a poster."""
     low, high = HOME_ART_RANGE
     return max(low, min(high, round(page_height * HOME_ART_SHARE)))
+
+
+LYRICS_CARD_MIN = (820, 380)
+LYRICS_CARD_MAX = (1400, 720)
+LYRICS_CARD_SHARE = (0.85, 0.6)  # of the Lyrics page's width and height
+
+
+def lyrics_card(page_width: int, page_height: int) -> tuple[int, int]:
+    """The Lyrics page card's size: as designed in the default window, growing
+    with a big or tiled one so the list gets the room."""
+    sizes = []
+    for size, low, high, share in zip(
+        (page_width, page_height), LYRICS_CARD_MIN, LYRICS_CARD_MAX, LYRICS_CARD_SHARE, strict=True
+    ):
+        sizes.append(max(low, min(high, round(size * share))))
+    return sizes[0], sizes[1]

@@ -22,7 +22,7 @@ from gi.repository import Gio, GLib, Gtk
 from encoregui.cover import CoverView
 from encoregui.lyriclist import LyricList
 from encoregui.ui import icon_button, icon_image, set_icon
-from encorelib.coverfit import home_art
+from encorelib.coverfit import home_art, lyrics_card
 from encorelib.journal import read_lines
 from encorelib.lyricview import live_position
 from encorelib.screen import lookup_reason, pick_music_apps, screen_state
@@ -417,13 +417,24 @@ class LyricsPage(Gtk.Box):
     def __init__(self, win):
         super().__init__()
         self.win = win
-        self.set_valign(Gtk.Align.CENTER)
-        self.set_halign(Gtk.Align.CENTER)
         self.key = ""
+        # the card sits centred and grows with a big or tiled window
+        # (coverfit.lyrics_card), measured by a probe over the whole page
+        holder = Gtk.Overlay()
+        holder.set_hexpand(True)
+        holder.set_vexpand(True)
+        self.append(holder)
         card = Gtk.Box(spacing=28)
         card.add_css_class("card")
-        card.set_size_request(820, 380)
-        self.append(card)
+        card.set_halign(Gtk.Align.CENTER)
+        card.set_valign(Gtk.Align.CENTER)
+        card.set_size_request(*lyrics_card(0, 0))
+        self.card = card
+        holder.set_child(card)
+        probe = Gtk.DrawingArea()
+        probe.set_can_target(False)
+        probe.connect("resize", lambda _p, w, h: self._fit_card(w, h))
+        holder.add_overlay(probe)
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         left.set_valign(Gtk.Align.CENTER)
         self.cover = CoverView(210)
@@ -471,6 +482,13 @@ class LyricsPage(Gtk.Box):
         self.message.set_margin_start(PAD_MESSAGE)
         self.right.add_named(self.message, "message")
         card.append(self.right)
+
+    def _fit_card(self, width: int, height: int) -> None:
+        if self.win.page not in ("home", "lyrics"):
+            return  # the show is up; its size says nothing about this page's
+        size = lyrics_card(width, height)
+        if size != tuple(self.card.get_size_request()):
+            self.card.set_size_request(*size)
 
     def update(self, state: dict, colors) -> None:
         set_meta(self.title, self.artist, state)

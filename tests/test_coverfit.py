@@ -39,3 +39,12 @@ def test_home_art_grows_with_the_window():
     assert home_art(870) == 348  # a 1280x1000 window
     assert home_art(5000) == 480  # never a poster
     assert home_art(0) == 256  # not laid out yet
+
+
+def test_lyrics_card_grows_with_the_window():
+    from encorelib.coverfit import lyrics_card
+
+    assert lyrics_card(960, 630) == (820, 380)  # the default window: as before
+    assert lyrics_card(1280, 870) == (1088, 522)
+    assert lyrics_card(4000, 3000) == (1400, 720)
+    assert lyrics_card(0, 0) == (820, 380)
