@@ -7,7 +7,10 @@ pytestmark = pytest.mark.e2e
 
 def test_harness_is_private(harness):
     real_runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
-    assert str(harness.socket).startswith(f"/run/user/{os.getuid()}/enc-")
+    # a private enc- dir (under the runtime tmpfs when it has room, else /tmp),
+    # never the owner's own $XDG_RUNTIME_DIR/hyde
+    assert "/enc-" in str(harness.socket)
+    assert not str(harness.socket).startswith(f"/run/user/{os.getuid()}/hyde")
     assert not str(harness.socket).startswith(f"{real_runtime}/hyde")
     assert harness.env["DBUS_SESSION_BUS_ADDRESS"] != os.environ.get("DBUS_SESSION_BUS_ADDRESS")
     assert len(str(harness.socket).encode()) < 108  # AF_UNIX path limit

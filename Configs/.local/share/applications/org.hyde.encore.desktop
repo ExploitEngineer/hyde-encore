@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Encore
+GenericName=Synced lyrics
+Comment=Word-synced lyrics, full-screen visuals and edge glow for whatever is playing
+Exec=hyde-shell encore app
+Icon=org.hyde.encore
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=lyrics;music;spotify;karaoke;glow;
+StartupWMClass=org.hyde.encore
+StartupNotify=true

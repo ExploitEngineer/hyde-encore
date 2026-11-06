@@ -18,11 +18,9 @@ import argparse
 import json
 import logging
 import os
-import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -33,11 +31,21 @@ if _hyde_lib not in sys.path:
     sys.path.append(_hyde_lib)
 
 import pyutils.logger as hyde_logger
+from encorelib.artwork import hd_art
 from encorelib.cache import LyricsCache
 from encorelib.clock import PlaybackClock, clean_rate
 from encorelib.config import EncoreConfig, load_config
+from encorelib.files import copy_atomic, write_atomic
 from encorelib.jobs import LatestJobs
 from encorelib.journal import append_capped, read_lines
+from encorelib.look import (
+    effective_autostart,
+    effective_players,
+    read_look,
+    restore_look,
+    state_look_path,
+    update_look,
+)
 from encorelib.lookup import lookup_lyrics
 from encorelib.palette import album_palette, cover_png, fetch_art, wallpaper_palette
 from encorelib.protocol import (
@@ -49,8 +57,10 @@ from encorelib.protocol import (
     read_state,
 )
 from encorelib.providers import TrackInfo, track_key
+from encorelib.service import surface_log
 from encorelib.session import (
     FetchGate,
+    Quiet,
     guarded,
     micros_to_seconds,
     order_by_recency,
@@ -68,9 +78,11 @@ HYPRLOCK_PATH = RUNTIME_DIR / "encore.hyprlock"
 TRACK_PATH = RUNTIME_DIR / "encore.track"  # title and artist lines for hyprlock
 OVERLAY_PIDFILE = RUNTIME_DIR / "encore-overlay.pid"
 LOOK_PATH = RUNTIME_DIR / "encore.look"
+LOOK_STATE = state_look_path()  # the look kept across reboots
+STATERC_PATH = LOOK_STATE.parent / "staterc"  # HyDE's own state (hyprlock layout)
+FOLLOW_PATH = RUNTIME_DIR / "encore.follow"  # a player the user picked by hand
 GLOW_PIDFILE = RUNTIME_DIR / "encore-glow.pid"
 LOOKUPS_PATH = RUNTIME_DIR / "encore.lookups"  # the last 50 lyric lookups
-PLAYER_PIDFILE = RUNTIME_DIR / "encore-player.pid"
 COVER_PATH = RUNTIME_DIR / "encore.cover.png"  # album art for hyprlock
 RUNTIME_FILES = (HYPRLOCK_PATH, TRACK_PATH, COVER_PATH)
 CACHE_DIR = xdg_cache_home() / "hyde" / "encore"
@@ -79,12 +91,11 @@ TICK_MS = 50
 RESYNC_TICKS = 20  # resync the clock with the player every second
 
 
-def write_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp, path)
+def read_pin() -> str | None:
+    try:
+        return FOLLOW_PATH.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
 
 
 class Encore:
@@ -106,22 +117,43 @@ class Encore:
         # skipping through songs only ever needs the newest track's work
         self.lyrics_jobs = LatestJobs(workers=2)
         self.palette_jobs = LatestJobs(workers=1)
+        # HD downloads can take seconds on a slow link: their own worker, so
+        # the next song's colors never queue behind them
+        self.hd_jobs = LatestJobs(workers=1)
         self.player = None
         self.track: TrackInfo | None = None
         self.art_url = ""
         self.lyrics = None
-        self.art: Path | None = None
+        self.lookup: str | None = None  # this track's lyrics lookup: pending or done
+        self.art: Path | None = None  # the 512 px PNG lock copy
+        self.cover: Path | None = None  # the best full-size cover (HD when found)
+        self.look = read_look(LOOK_PATH)
+        self.allow = effective_players(cfg, self.look)
+        self.hd_covers = self.look.get("hd_covers", cfg.hd_covers)
         self.palette: dict[str, str] = wallpaper_palette()
         self.theme = wallpaper_palette()  # the HyDE theme, for grey covers
         self.shown_cover: Path | None = None
+        self.quiet = Quiet()  # a full runtime dir is said once a minute, not 20 times a second
         self.tick_id = 0
         self.ticks = 0
         self.recent: list[str] = []
+        self.pin = read_pin()
         self.last_cursor = None
         # MPRIS Rate of the followed player; Playerctl does not expose it
         self.rate_proxy = None
         self.rate_instance: str | None = None
         self.rate_handler = 0
+
+        # the player chip and `encore follow` pin a player through FOLLOW_PATH
+        self.follow_monitor = Gio.File.new_for_path(str(FOLLOW_PATH)).monitor_file(
+            Gio.FileMonitorFlags.NONE, None
+        )
+        self.follow_monitor.connect("changed", self.on_follow_changed)
+        # the app's settings (followed players, HD covers) apply live
+        self.look_monitor = Gio.File.new_for_path(str(LOOK_PATH)).monitor_file(
+            Gio.FileMonitorFlags.NONE, None
+        )
+        self.look_monitor.connect("changed", self.on_look_changed)
 
         self.manager = Playerctl.PlayerManager()
         self.manager.connect("name-appeared", self.on_name_appeared)
@@ -155,7 +187,36 @@ class Encore:
     def on_player_vanished(self, _manager, player) -> None:
         if self.is_current(player):
             self.player = None
+        if self.pin and pick_player([(player.props.player_instance, "")], (), self.pin):
+            # the pinned player closed: the pin goes with it, unless another
+            # instance of it (another browser window) is still there
+            gone = player.props.player_instance
+            left = [
+                (p.props.player_instance, "")
+                for p in self.manager.props.players
+                if p.props.player_instance != gone
+            ]
+            if not pick_player(left, (), self.pin):
+                self.pin = None
+                FOLLOW_PATH.unlink(missing_ok=True)
         self.choose_player()
+
+    @guarded()
+    def on_look_changed(self, _monitor, _file, _other, _event) -> None:
+        self.look = read_look(LOOK_PATH)
+        self.hd_covers = self.look.get("hd_covers", self.cfg.hd_covers)
+        allow = effective_players(self.cfg, self.look)
+        if allow != self.allow:
+            self.allow = allow
+            self.choose_player()
+
+    @guarded()
+    def on_follow_changed(self, _monitor, _file, _other, _event) -> None:
+        pin = read_pin()
+        if pin != self.pin:
+            self.pin = pin
+            logger.info(f"encore pin: {pin or 'none'}")
+            self.choose_player()
 
     def status_of(self, player) -> str:
         return player.props.playback_status.value_nick
@@ -164,7 +225,7 @@ class Encore:
         players = {p.props.player_instance: p for p in self.manager.props.players}
         order = order_by_recency(list(players), self.recent)
         name = pick_player(
-            [(inst, self.status_of(players[inst])) for inst in order], self.cfg.players
+            [(inst, self.status_of(players[inst])) for inst in order], self.allow, self.pin
         )
         chosen = players.get(name) if name else None
         if chosen is None or not self.is_current(chosen):
@@ -208,8 +269,24 @@ class Encore:
 
     @guarded()
     def on_player_properties(self, _proxy, changed, _invalidated) -> None:
-        if "Rate" in changed.unpack():
+        props = changed.unpack()
+        if "Rate" in props:
             self.refresh_playback()
+        elif "Volume" in props:
+            self.publish()
+
+    def player_volume(self) -> float | None:
+        """The followed player's MPRIS Volume, None when it does not offer one."""
+        if self.rate_proxy is None:
+            return None
+        value = self.rate_proxy.get_cached_property("Volume")
+        if value is None or value.get_type_string() != "d":
+            return None
+        return max(0.0, min(1.0, round(value.unpack(), 3)))
+
+    def player_names(self) -> list[str]:
+        names = [p.props.player_instance for p in self.manager.props.players]
+        return order_by_recency(names, self.recent)
 
     def player_rate(self) -> float:
         if self.rate_proxy is None:
@@ -262,7 +339,8 @@ class Encore:
         found = self.read_track()
         if found is None:
             if self.track is not None:
-                self.track, self.lyrics, self.art = None, None, None
+                self.track, self.lyrics, self.art, self.cover = None, None, None, None
+                self.lookup = None
                 self.lyrics_gate.begin("")
                 self.palette_gate.begin("")
             return
@@ -276,7 +354,8 @@ class Encore:
                 self.start_palette(info, art_url)
             return
         self.track, self.art_url = info, art_url
-        self.lyrics, self.art, self.last_cursor = None, None, None
+        self.lyrics, self.art, self.cover, self.last_cursor = None, None, None, None
+        self.lookup = "pending"
         token = self.lyrics_gate.begin(track_key(info))
         self.lyrics_jobs.submit(lambda: self.fetch_lyrics(info, token))
         self.start_palette(info, art_url)
@@ -312,6 +391,7 @@ class Encore:
             source = lyrics.source if lyrics else "none"
             logger.info(f"lyrics: {source}")
             self.lyrics = lyrics
+            self.lookup = "done"
             self.last_cursor = None
             self.publish()
         return False
@@ -320,7 +400,8 @@ class Encore:
         token = self.palette_gate.begin(track_key(info))
 
         def work():
-            art, palette = None, {}
+            key = track_key(info)
+            art, palette, original = None, {}, None
             try:
                 original = fetch_art(art_url, CACHE_DIR / "art")
                 if original:
@@ -328,16 +409,45 @@ class Encore:
                     art = cover_png(original, CACHE_DIR / "covers") or original
             except Exception:
                 log.exception("album palette failed")
-            self.GLib.idle_add(self.apply_palette, token, track_key(info), art, palette)
+            self.GLib.idle_add(self.apply_palette, token, key, art, palette, original)
+            self.hd_jobs.submit(lambda: hd_work(key, original))
+
+        def hd_work(key: str, original):
+            try:
+                hd = hd_art(
+                    art_url,
+                    original,
+                    info.artist,
+                    info.album,
+                    info.title,
+                    CACHE_DIR / "hd",
+                    apple=self.hd_covers,
+                )
+                if hd is not None and original is None:
+                    # a player without a cover: Apple's still gives the colors
+                    palette = album_palette(hd, CACHE_DIR / "palette")
+                    art = cover_png(hd, CACHE_DIR / "covers")
+                    self.GLib.idle_add(self.apply_palette, token, key, art, palette, hd)
+                elif hd is not None:
+                    self.GLib.idle_add(self.apply_cover, token, key, hd)
+            except Exception:
+                log.exception("HD cover failed")
 
         self.palette_jobs.submit(work)
 
-    def apply_palette(self, token: int, key: str, art, palette) -> bool:
+    def apply_palette(self, token: int, key: str, art, palette, cover) -> bool:
         if self.palette_gate.accept(token, key):
             self.art = art
+            self.cover = cover
             self.theme = wallpaper_palette()  # once per track: wallpaper or theme may change
             self.palette = palette or self.theme
             self.last_cursor = None
+            self.publish()
+        return False
+
+    def apply_cover(self, token: int, key: str, cover) -> bool:
+        if self.palette_gate.accept(token, key):
+            self.cover = cover
             self.publish()
         return False
 
@@ -390,32 +500,59 @@ class Encore:
         if cover is None:
             COVER_PATH.unlink(missing_ok=True)
             return
-        tmp = COVER_PATH.with_suffix(".tmp.png")
-        shutil.copyfile(cover, tmp)
-        os.replace(tmp, COVER_PATH)
+        copy_atomic(cover, COVER_PATH)
 
     def publish(self) -> None:
         cursor = locate(self.lyrics, self.clock.position()) if self.lyrics else NO_CURSOR
         self.last_cursor = (cursor.line, cursor.word)
         accent, dim = hyprlock_colors(self.cfg, self.palette, self.theme)
         markup = hyprlock_markup(self.lyrics, cursor, accent, dim) if self.track else ""
-        write_atomic(HYPRLOCK_PATH, markup + "\n" if markup else "")
-        write_atomic(TRACK_PATH, hyprlock_track(self.track))
-        self.show_cover()
+        try:
+            write_atomic(HYPRLOCK_PATH, markup + "\n" if markup else "")
+            write_atomic(TRACK_PATH, hyprlock_track(self.track))
+            self.show_cover()
+        except OSError as error:
+            # the lock screen files are a courtesy; the socket below still serves
+            # every surface, and the cover is tried again on the next publish
+            self.shown_cover = None
+            if self.quiet.should("runtime", time.monotonic()):
+                logger.warning(f"runtime files not written: {error}; state still on the socket")
+        else:
+            self.quiet.clear("runtime")
         self.server.broadcast(
-            build_state(self.status(), self.track, self.art, self.lyrics, self.clock, self.palette)
+            build_state(
+                self.status(),
+                self.track,
+                self.art,
+                self.lyrics,
+                self.clock,
+                self.palette,
+                cover=self.cover,
+                players=self.player_names(),
+                volume=self.player_volume(),
+                lookup=self.lookup,
+            )
+        )
+
+
+def _spawn_surface(*args: str) -> None:
+    """Start a surface as its own detached process via encore.sh (LD_PRELOAD)."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encore.sh")
+    with open(surface_log(args[0]), "w", encoding="utf-8") as log_file:  # why it died, if it dies
+        subprocess.Popen(
+            ["bash", script, *args],
+            start_new_session=True,
+            stdout=log_file,
+            stderr=log_file,
         )
 
 
 def spawn_overlay() -> None:
-    """Start the overlay as its own detached process via encore.sh (LD_PRELOAD)."""
-    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encore.sh")
-    subprocess.Popen(
-        ["bash", script, "overlay"],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    _spawn_surface("overlay")
+
+
+def spawn_glow() -> None:
+    _spawn_surface("glow", "--run")
 
 
 def ensure_daemon() -> None:
@@ -455,10 +592,12 @@ def run_toggle() -> int:
     pid = single.read_pid(OVERLAY_PIDFILE)
     if pid is not None and single.pid_alive(pid):
         os.kill(pid, signal.SIGTERM)
+        update_look(LOOK_PATH, persist=LOOK_STATE, desktop_lyrics_on=False)
         print("encore overlay hidden")
         return 0
     ensure_daemon()
     spawn_overlay()
+    update_look(LOOK_PATH, persist=LOOK_STATE, desktop_lyrics_on=True)
     print("encore overlay shown")
     return 0
 
@@ -485,25 +624,25 @@ def run_glow_toggle() -> int:
     pid = single.read_pid(GLOW_PIDFILE)
     if pid is not None and single.pid_alive(pid):
         os.kill(pid, signal.SIGTERM)
+        update_look(LOOK_PATH, persist=LOOK_STATE, glow_on=False)
         print("encore glow off")
         return 0
     ensure_daemon()
-    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encore.sh")
-    subprocess.Popen(
-        ["bash", script, "glow", "--run"],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    spawn_glow()
+    update_look(LOOK_PATH, persist=LOOK_STATE, glow_on=True)
     print("encore glow on")
     return 0
 
 
-def run_player_cmd(start: str = "player") -> int:
-    from encoregui.player import run_player
+APP_PAGES = ("home", "lyrics", "stage", "full", "look", "settings")
+
+
+def run_app_cmd(page: str | None = None) -> int:
+    """Open the Encore window, or bring it forward (on `page` when given)."""
+    from encoregui.app import run_app
 
     ensure_daemon()
-    return run_player(str(RUNTIME_DIR), str(PLAYER_PIDFILE), start)
+    return run_app(str(RUNTIME_DIR), page)
 
 
 def _ensure(pidfile: Path, command: list[str], want_on: bool) -> None:
@@ -518,7 +657,7 @@ def _ensure(pidfile: Path, command: list[str], want_on: bool) -> None:
 def run_profile(name: str) -> int:
     from encorelib.profiles import PROFILES, apply_profile
 
-    glow = apply_profile(LOOK_PATH, name)
+    glow = apply_profile(LOOK_PATH, name, persist=LOOK_STATE)
     if glow is None:
         print(f"unknown profile {name!r}; one of: {', '.join(PROFILES)}", file=sys.stderr)
         return 1
@@ -529,29 +668,47 @@ def run_profile(name: str) -> int:
     return 0
 
 
-def run_show() -> int:
-    """Toggle the show workspace: an empty stage with the full show running."""
-    from encorelib.profiles import SHOW_WORKSPACE, show_action
+def run_follow(name: str) -> int:
+    """Pin the player encore follows, or 'auto' to follow the most recent one."""
+    name = name.strip()
+    if name in ("", "auto"):
+        FOLLOW_PATH.unlink(missing_ok=True)
+        print("encore follows the most recently started player")
+        return 0
+    write_atomic(FOLLOW_PATH, name + "\n")
+    print(f"encore follows {name}")
+    return 0
 
+
+def run_lock(action: str) -> int:
+    """Lyrics on the lock screen: on, off (restoring the previous layout), preview, status."""
+    from encorelib.lockscreen import DEFAULT_LAYOUT, ENCORE_LAYOUT, read_layout, with_layout
+
+    quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "timeout": 60}
+    if action == "preview":
+        subprocess.run(["hyde-shell", "hyprlock.sh", "--test", ENCORE_LAYOUT], check=False, **quiet)
+        return 0
     try:
-        active = json.loads(
-            subprocess.run(
-                ["hyprctl", "activeworkspace", "-j"], capture_output=True, text=True, check=True
-            ).stdout
-        ).get("name", "")
-    except (OSError, ValueError, subprocess.CalledProcessError):
-        active = ""
-    if show_action(active) == "enter":
-        subprocess.run(
-            ["hyprctl", "dispatch", "workspace", f"name:{SHOW_WORKSPACE}"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-        )
-        return run_profile("show")
-    subprocess.run(
-        ["hyprctl", "dispatch", "workspace", "previous"], check=False, stdout=subprocess.DEVNULL
-    )
-    return run_profile("working")
+        text = STATERC_PATH.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    current = read_layout(text) or DEFAULT_LAYOUT
+    if action == "status":
+        print("on" if current == ENCORE_LAYOUT else "off")
+        return 0
+    if action == "on":
+        if current != ENCORE_LAYOUT:  # remember what to go back to, once
+            update_look(LOOK_PATH, persist=LOOK_STATE, lock_previous=current)
+        layout = ENCORE_LAYOUT
+    else:
+        layout = read_look(LOOK_PATH).get("lock_previous") or DEFAULT_LAYOUT
+        if layout == ENCORE_LAYOUT:
+            layout = DEFAULT_LAYOUT
+        update_look(LOOK_PATH, persist=LOOK_STATE, lock_previous=None)
+    write_atomic(STATERC_PATH, with_layout(text, layout))
+    subprocess.run(["hyde-shell", "hyprlock.sh", "--reload"], check=False, **quiet)
+    print(f"lock screen lyrics {action}")
+    return 0
 
 
 def run_style(name: str) -> int:
@@ -565,7 +722,7 @@ def run_style(name: str) -> int:
     if name not in STYLES:
         print(f"unknown style {name!r}; one of: {', '.join(STYLES)}", file=sys.stderr)
         return 1
-    update_look(LOOK_PATH, style=name)
+    update_look(LOOK_PATH, persist=LOOK_STATE, style=name)
     print(name)
     return 0
 
@@ -575,7 +732,14 @@ def run_look(key: str, value: str) -> int:
 
     if key == "reset":
         update_look(
-            LOOK_PATH, style=None, font=None, size=None, color=None, next_line=None, motion=None
+            LOOK_PATH,
+            persist=LOOK_STATE,
+            style=None,
+            font=None,
+            size=None,
+            color=None,
+            next_line=None,
+            motion=None,
         )
         print("look reset to config")
         return 0
@@ -598,7 +762,7 @@ def run_look(key: str, value: str) -> int:
         print("usage: encore look font|size|color|next-line|reset [value]", file=sys.stderr)
         return 1
     before = dict(change)
-    after = update_look(LOOK_PATH, **change)
+    after = update_look(LOOK_PATH, persist=LOOK_STATE, **change)
     for k, v in before.items():
         if v is not None and after.get(k) != v:
             print(f"rejected {k}={v!r}", file=sys.stderr)
@@ -672,11 +836,11 @@ def run_menu() -> int:
             )
             pick = _rofi(families, "font")
             if pick:
-                update_look(LOOK_PATH, font=pick)
+                update_look(LOOK_PATH, persist=LOOK_STATE, font=pick)
         elif row == 5:
             pick = _rofi([str(n) for n in range(18, 58, 4)], "size")
             if pick.isdigit():
-                update_look(LOOK_PATH, size=int(pick))
+                update_look(LOOK_PATH, persist=LOOK_STATE, size=int(pick))
         elif row == 6:
             palette = state.get("palette") or {}
             swatches = ["auto"] + [
@@ -686,9 +850,11 @@ def run_menu() -> int:
             ]
             pick = _rofi(swatches, "color (hex or auto)")
             if pick:
-                update_look(LOOK_PATH, color=None if pick == "auto" else pick.split()[0])
+                update_look(
+                    LOOK_PATH, persist=LOOK_STATE, color=None if pick == "auto" else pick.split()[0]
+                )
         elif row == 7:
-            update_look(LOOK_PATH, motion=not look.get("motion", True))
+            update_look(LOOK_PATH, persist=LOOK_STATE, motion=not look.get("motion", True))
         elif row == 8:
             run_toggle()
         elif row == 9:
@@ -703,6 +869,7 @@ def run_menu() -> int:
         elif row == 11:
             update_look(
                 LOOK_PATH,
+                persist=LOOK_STATE,
                 style=None,
                 font=None,
                 size=None,
@@ -719,7 +886,8 @@ def run_daemon(if_enabled: bool) -> int:
 
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING, format="encore: %(message)s")
     cfg = load_config()
-    if if_enabled and not cfg.enable:
+    look = read_look(LOOK_PATH)
+    if if_enabled and not effective_autostart(cfg, look):
         return 0
     server = StateServer(SOCKET_PATH)
     try:
@@ -730,6 +898,7 @@ def run_daemon(if_enabled: bool) -> int:
 
     loop = GLib.MainLoop()
 
+    @guarded(default=True)  # a failed accept must never remove the listener
     def on_client(_fd, _condition) -> bool:
         server.accept()
         return True
@@ -746,8 +915,12 @@ def run_daemon(if_enabled: bool) -> int:
 
     try:
         Encore(cfg, server)
-        if cfg.overlay_enable:
+        # surfaces that were on come back with the service (their own
+        # single-instance claims make this a no-op when they still run)
+        if cfg.overlay_enable or look.get("desktop_lyrics_on"):
             spawn_overlay()
+        if look.get("glow_on"):
+            spawn_glow()
         loop.run()
     finally:
         server.close()
@@ -767,29 +940,33 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("toggle", help="show or hide the lyrics overlay")
     glow = sub.add_parser("glow", help="toggle the screen-edge glow")
     glow.add_argument("--run", action="store_true", help="run the glow process in the foreground")
-    style = sub.add_parser("style", help="switch the overlay style (line, stack, constellation)")
+    style = sub.add_parser(
+        "style", help="switch the lyric style (line, stack, constellation, visual, code)"
+    )
     style.add_argument("name", nargs="?", default="next", help="style name, or 'next' to cycle")
     look = sub.add_parser(
         "look", help="change the overlay look live (font, size, color, next-line, reset)"
     )
     look.add_argument("key", help="font | size | color | next-line | motion | reset")
     look.add_argument("value", nargs="?", default="", help="new value ('auto' for color resets it)")
-    menu = sub.add_parser("menu", help="open the encore player window")
+    app = sub.add_parser("app", help="open Encore, or bring its window forward")
+    app.add_argument("--open", choices=APP_PAGES, default=None, help="show this page of the window")
+    menu = sub.add_parser("menu", help="open Encore (same as 'app')")
     menu.add_argument("--rofi", action="store_true", help="use the compact rofi menu instead")
-    player = sub.add_parser("player", help="open the encore player window")
-    player.add_argument(
-        "--open",
-        choices=("player", "lyrics", "look", "glow"),
-        default="player",
-        help="start in lyrics view, or with the look menu or glow settings open",
-    )
-    profile = sub.add_parser("profile", help="apply a sound setup: working or show")
-    profile.add_argument("name", help="working | show")
-    sub.add_parser("show", help="toggle the show workspace (full show on an empty stage)")
+    player = sub.add_parser("player", help="open Encore (same as 'app')")
+    player.add_argument("--open", choices=("player", *APP_PAGES), default=None)
+    profile = sub.add_parser("profile", help="apply a sound setup (working)")
+    profile.add_argument("name", help="working")
+    lock = sub.add_parser("lock", help="lyrics on the lock screen: on, off, preview, status")
+    lock.add_argument("action", choices=("on", "off", "preview", "status"))
+    follow = sub.add_parser("follow", help="follow one player, or 'auto' for the most recent")
+    follow.add_argument("name", help="an MPRIS player name (e.g. spotify), or auto")
     sub.add_parser("status", help="print the current state as JSON")
     sub.add_parser("lookups", help="show the last lyric lookups and what they found")
     sub.add_parser("hyprlock", help="print the current lyric line as Pango markup")
     args = parser.parse_args(argv)
+    # after a reboot the runtime look is gone: every entry point restores it
+    restore_look(LOOK_PATH, LOOK_STATE)
 
     if args.command == "daemon":
         return run_daemon(args.if_enabled)
@@ -801,14 +978,14 @@ def main(argv: list[str] | None = None) -> int:
         return run_style(args.name)
     if args.command == "look":
         return run_look(args.key, args.value)
+    if args.command == "app":
+        return run_app_cmd(args.open)
     if args.command == "menu":
-        return run_menu() if args.rofi else run_player_cmd()
+        return run_menu() if args.rofi else run_app_cmd()
     if args.command == "player":
-        return run_player_cmd(args.open)
+        return run_app_cmd("home" if args.open == "player" else args.open)
     if args.command == "profile":
         return run_profile(args.name)
-    if args.command == "show":
-        return run_show()
     if args.command == "glow":
         return run_glow_cmd() if args.run else run_glow_toggle()
     if args.command == "lookups":
@@ -821,6 +998,10 @@ def main(argv: list[str] | None = None) -> int:
                 f"{r.get('at', ''):8}  {r.get('player', ''):14.14}  {who[:60]:60}  {r.get('result')}"
             )
         return 0
+    if args.command == "lock":
+        return run_lock(args.action)
+    if args.command == "follow":
+        return run_follow(args.name)
     if args.command == "status":
         print(json.dumps(read_state(SOCKET_PATH) or {"status": "stopped"}, ensure_ascii=False))
         return 0

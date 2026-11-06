@@ -1,6 +1,6 @@
 # hyde-encore
 
-Music-reactive ambience for [HyDE](https://github.com/HyDE-Project/HyDE): word-by-word synced lyrics over your desktop, a beat-reactive screen-edge glow, a player window, and a lyrics lock screen, all colored from the album art.
+Music-reactive ambience for [HyDE](https://github.com/HyDE-Project/HyDE): an app with word-by-word synced lyrics (in a window, full screen, or over your desktop), a beat-reactive screen-edge glow, and a lyrics lock screen, all colored from the album art.
 
 The tree under `Configs/` mirrors HyDE's own layout so the work can be proposed upstream as pull requests.
 
@@ -22,7 +22,7 @@ A layer-by-layer quality pass is under way (engine, daemon, overlay, glow, playe
   - `visual`: the album art fills the screen under the rolling column, the sung word sits on a Highlight marker, some words get a glyph.
 - `hyde-shell encore style next` cycles the styles; `hyde-shell encore look font|size|color|next-line|motion|reset` changes the look live.
 - `hyde-shell encore glow` toggles a screen-edge glow in the album colors: two comets circle the frame and speed up on the beat when HyDE's cava is running, and it breathes softly without it.
-- `hyde-shell encore menu` opens the player window: album art, transport controls, a Lyrics view with the whole song scrolling, a look menu (style, font, size, lyric colors) and a Settings popover for the glow (gradient, animation, thickness, glow, override colors).
+- **Encore** in the app launcher opens the window: HD album art, seek, transport and volume, which player to follow, a Lyrics page, Full screen (lyrics over the cover or clear black, with controls that fade in on mouse motion and Esc always returning), a look menu (style, font, size, lyric colors) and Settings (glow, lock screen, HD covers, players, start at login). Closing it keeps Encore in the tray while desktop lyrics or the glow run.
 - `hyde-shell encore profile working|show` applies a sound setup; `hyde-shell encore show` toggles an empty `encore` workspace running the full show.
 - `hyde-shell encore status` prints the live state as JSON; the same JSON lines stream on `$XDG_RUNTIME_DIR/hyde/encore.sock`.
 - The `Encore` hyprlock layout shows the album art, title, artist and the lyric line with sung words highlighted.
@@ -36,19 +36,29 @@ Requirements: HyDE, `python-gobject`, `playerctl`, `imagemagick` (all present on
 for f in encore.py encore.sh encorelib encoregui; do
   ln -s "$PWD/Configs/.local/lib/hyde/$f" ~/.local/lib/hyde/$f
 done
+# "Encore" in the app launcher, with its icon
+mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/scalable/apps
+ln -s "$PWD/Configs/.local/share/applications/org.hyde.encore.desktop" ~/.local/share/applications/
+ln -s "$PWD/Configs/.local/share/icons/hicolor/scalable/apps/org.hyde.encore.svg" \
+  ~/.local/share/icons/hicolor/scalable/apps/
 # copy, not link: hyprlock.sh does not follow symlinked layouts
 cp Configs/.config/hypr/hyprlock/Encore.conf ~/.config/hypr/hyprlock/Encore.conf
+```
 
-hyde-shell encore daemon          # run in a terminal, play a song
-hyde-shell encore toggle          # lyrics overlay on or off
-hyde-shell encore menu            # player window
+Then open **Encore** from the app launcher, like any app.
+From a terminal the same commands are:
+
+```sh
+hyde-shell encore app             # the Encore window (again: brings it forward)
+hyde-shell encore toggle          # lyrics on the desktop, on or off
 hyde-shell hyprlock.sh --select   # pick the "Encore" lock screen layout
 ```
 
-Suggested binds and the player window rule are in `Configs/.local/share/hypr/lua/key_binds.encore.lua` and `window_rules.encore.lua`; copy them into `~/.config/hypr/hyprland.lua`.
-The binds are SUPER+ALT+L (overlay), SUPER+ALT+K (next style), SUPER+ALT+M (player) and SUPER+ALT+E (show workspace).
+Optional binds and the window rule are in `Configs/.local/share/hypr/lua/key_binds.encore.lua` and `window_rules.encore.lua`; copy them into `~/.config/hypr/hyprland.lua`.
+The binds are SUPER+ALT+L (lyrics on the desktop), SUPER+ALT+K (next style) and SUPER+ALT+M (open Encore).
+In the window: Space play, Left and Right seek, Up and Down volume, N and P next and previous, L lyrics, F full screen, Esc back, Ctrl+Q quit.
 
-Opening the overlay, the glow or the player starts the `encore` service when it is not running.
+Opening Encore, the desktop lyrics or the glow starts the `encore` service when it is not running; "Start at login" in Settings keeps it running from the next login.
 To start it with your session too, set `enable = true` under `[encore]` in `~/.config/hyde/config.toml` and add this to `~/.config/hypr/hyprland.lua`:
 
 ```lua
@@ -63,7 +73,7 @@ HyDE's `start_up.lua` runs only the `hc.start` keys it names, so a `[desktop.sta
 ## Configuration
 
 All keys live in `~/.config/hyde/config.toml`; see `Configs/.local/share/hyde/schema/config.toml` for the full list.
-Changes made live through `encore look`, `encore style` or the player window sit on top of these and reset on reboot.
+Changes made live through `encore look`, `encore style` or the window sit on top of these and are kept across reboots.
 
 ```toml
 [encore]

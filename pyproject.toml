@@ -2,7 +2,11 @@
 # Configs/.local/lib/hyde; encore adds no runtime Python dependencies.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["e2e: runs the daemon against fake players on a private bus (deselect with -m \"not e2e\")"]
+markers = [
+  "e2e: runs the daemon against fake players on a private bus (deselect with -m \"not e2e\")",
+  "lab: opens Encore's windows on a hidden Hyprland monitor (opt in with -m lab)",
+]
+addopts = "-m 'not lab'"
 
 [tool.ruff]
 line-length = 100

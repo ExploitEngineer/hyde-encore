@@ -1,4 +1,4 @@
-"""LineRaster geometry (needs PyGObject with Pango and gtk4-layer-shell typelibs)."""
+"""LineRaster geometry (needs PyGObject with Pango typelibs)."""
 
 import pytest
 
@@ -7,7 +7,7 @@ gi = pytest.importorskip("gi")
 
 def raster(text, words, size):
     try:
-        from encoregui.overlay import LineRaster
+        from encoregui.lyrics import LineRaster
     except (ImportError, ValueError) as e:
         pytest.skip(f"GTK typelibs unavailable: {e}")
     return LineRaster(text, words, "Inter", size, 1600, (1.0, 0.2, 0.4), 1)

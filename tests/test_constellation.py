@@ -93,3 +93,16 @@ def test_chain_is_centered_on_screen():
 def test_short_line_is_centered_too():
     pts = chain_words(["only", "two"], 1920, 1080, seed="short")
     assert abs((pts[0][0] + pts[1][0]) / 2 - 960) < 60
+
+
+def test_chain_words_keep_big_words_apart():
+    # the newest word is drawn at word_px and its neighbour at half that: each
+    # step clears both half widths, so the big word never lands on the last one
+    words = ["Call", "your", "name", "across", "the", "night"]
+    word_px = 76.0
+    points = chain_words(words, 1920, 1080, seed="k", word_px=word_px)
+    for (x1, y1), (x2, y2), prev, cur in zip(points, points[1:], words, words[1:], strict=False):
+        need = 0.3 * word_px * (0.5 * len(prev) + len(cur))
+        dx, dy = abs(x2 - x1), abs(y2 - y1)
+        assert dx >= need * 0.95 or dy >= word_px * 0.9, (prev, cur, dx, dy, need)
+    assert chain_words(words, 1920, 1080, seed="k") == chain_words(words, 1920, 1080, seed="k")

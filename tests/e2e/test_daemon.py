@@ -1,7 +1,10 @@
 import signal
+import subprocess
+import sys
 import time
 
 import pytest
+from harness import LIB
 
 pytestmark = pytest.mark.e2e
 
@@ -174,3 +177,137 @@ def test_lookups_are_journaled(playing):
         for line in (playing.run / "hyde" / "encore.lookups").read_text().splitlines()
     ]
     assert rows[-1]["title"] == TITLE and rows[-1]["result"] == "local/line"
+
+
+def run_cli(h, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(LIB / "encore.py"), *args],
+        env=h.env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+
+def test_state_lists_players_newest_first(harness):
+    harness.start_player("encoretest")
+    harness.start_player("encoretest2")
+    harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    harness.wait(lambda s: s["player"] == "encoretest")
+    harness.ctl("encoretest2", "play")
+    state = harness.wait(lambda s: (s.get("players") or [""])[0] == "encoretest2")
+    assert sorted(state["players"]) == ["encoretest", "encoretest2"]
+
+
+def test_volume_published_and_follows_changes(playing):
+    playing.wait(lambda s: s["volume"] == 1.0)
+    playing.ctl("encoretest", "volume", "0.4")
+    playing.wait(lambda s: s["volume"] == 0.4)
+
+
+def test_volume_null_when_player_has_none(harness):
+    harness.start_player("encoretest", "", "--no-volume")
+    harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    harness.wait(lambda s: s["status"] == "playing")
+    # Rate is read through the same proxy as Volume: once it shows, the proxy is live
+    harness.set_rate("encoretest", 1.5)
+    state = harness.wait(lambda s: s["rate"] == 1.5)
+    assert state["volume"] is None
+
+
+def test_follow_pin_switches_and_clears(harness):
+    harness.start_player("encoretest")
+    second = harness.start_player("encoretest2")
+    harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    harness.wait(lambda s: s["player"] == "encoretest")
+    assert run_cli(harness, "follow", "encoretest2").returncode == 0
+    harness.wait(lambda s: s["player"] == "encoretest2")
+    follow = harness.run / "hyde" / "encore.follow"
+    assert follow.read_text().strip() == "encoretest2"
+    second.terminate()
+    second.wait(timeout=5)
+    harness.wait(lambda s: s["player"] == "encoretest")
+    harness.wait_until(lambda: not follow.exists(), "the pin to clear")
+
+
+def test_follow_auto_removes_pin(harness):
+    harness.start_player("encoretest")
+    harness.start_player("encoretest2")
+    harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    run_cli(harness, "follow", "encoretest2")
+    harness.wait(lambda s: s["player"] == "encoretest2")
+    assert run_cli(harness, "follow", "auto").returncode == 0
+    harness.wait(lambda s: s["player"] == "encoretest")
+    assert not (harness.run / "hyde" / "encore.follow").exists()
+
+
+def test_if_enabled_honors_autostart(harness):
+    state_look = harness.tmp / "state" / "hyde" / "encore.look"
+    state_look.parent.mkdir(parents=True, exist_ok=True)
+    state_look.write_text('{"autostart": true}')
+    harness._spawn([sys.executable, str(LIB / "encore.py"), "daemon", "--if-enabled"], "auto.log")
+    harness.wait_until(lambda: harness.state() is not None, "the daemon to answer")
+    # the runtime look is restored from the kept one at start
+    assert (harness.run / "hyde" / "encore.look").read_text() == '{"autostart": true}'
+
+
+def test_if_enabled_stays_off_by_default(harness):
+    out = subprocess.run(
+        [sys.executable, str(LIB / "encore.py"), "daemon", "--if-enabled"],
+        env=harness.env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert out.returncode == 0
+    assert harness.state() is None
+
+
+def test_look_players_filter_applies_live(harness):
+    from encorelib.look import update_look
+
+    harness.start_player("encoretest")
+    harness.start_player("encoretest2")
+    harness.start_daemon()
+    harness.wait(lambda s: len(s.get("players") or []) == 2)
+    harness.ctl("encoretest2", "play")
+    harness.wait(lambda s: s["player"] == "encoretest2")
+    harness.ctl("encoretest", "play")
+    harness.wait(lambda s: s["player"] == "encoretest")
+    update_look(harness.run / "hyde" / "encore.look", players=["encoretest2"])
+    harness.wait(lambda s: s["player"] == "encoretest2")
+
+
+def test_lookup_done_without_lyrics(harness):
+    harness.start_player()
+    harness.start_daemon()
+    harness.ctl("encoretest", "play")
+    state = harness.wait(lambda s: s["status"] == "playing" and s.get("lookup") == "done")
+    assert state["lyrics"] is None
+
+
+def test_lookup_done_with_lyrics(playing):
+    assert playing.state()["lookup"] == "done"
+
+
+def test_if_enabled_app_switch_overrides_config(harness):
+    state_look = harness.tmp / "state" / "hyde" / "encore.look"
+    state_look.parent.mkdir(parents=True, exist_ok=True)
+    state_look.write_text('{"autostart": false}')
+    harness.env["ENCORE_ENABLE"] = "true"
+    out = subprocess.run(
+        [sys.executable, str(LIB / "encore.py"), "daemon", "--if-enabled"],
+        env=harness.env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert out.returncode == 0
+    assert harness.state() is None

@@ -64,7 +64,7 @@ def test_live_position_playing_and_paused():
 
 
 def test_fill_mid_word():
-    v = build_view(state(), 1000.0)  # live pos 10.5, inside word one
+    v = build_view(state(), 1000.0, lead=0.0)  # live pos 10.5, inside word one
     assert v.visible is True
     assert v.text == "one two"
     assert v.next_text == "next line text"
@@ -83,7 +83,7 @@ def test_sung_and_unsung_words():
 
 
 def test_paused_mid_word_is_frozen():
-    v = build_view(state(status="paused"), 1010.0)
+    v = build_view(state(status="paused"), 1010.0, lead=0.0)
     assert v.visible is True
     assert v.words[0][1] == pytest.approx(0.5)
     assert v.animating is False
@@ -91,17 +91,17 @@ def test_paused_mid_word_is_frozen():
 
 
 def test_wake_in_between_words():
-    v = build_view(state(position=11.5), 1000.0)
+    v = build_view(state(position=11.5), 1000.0, lead=0.0)
     assert v.wake_in == pytest.approx(0.5)
 
 
 def test_rate_two_halves_wake_in():
-    v = build_view(state(position=11.5, rate=2.0), 1000.0)
+    v = build_view(state(position=11.5, rate=2.0), 1000.0, lead=0.0)
     assert v.wake_in == pytest.approx(0.25)
 
 
 def test_visible_in_short_gap():
-    v = build_view(state(position=13.0 + GAP_HIDE_SECONDS - 0.1), 1000.0)
+    v = build_view(state(position=13.0 + GAP_HIDE_SECONDS - 0.1), 1000.0, lead=0.0)
     assert v.visible is True
     assert v.animating is False
     assert v.wake_in == pytest.approx(0.1)
@@ -164,12 +164,18 @@ def test_current_word_index():
 def test_next_word_boundary_mid_word_and_between():
     from encorelib.lyricview import next_word_boundary
 
-    assert next_word_boundary(state(), 1000.0) == pytest.approx(1.5)  # start of "two"
-    assert next_word_boundary(state(position=11.5), 1000.0) == pytest.approx(0.5)  # start of "two"
-    assert next_word_boundary(state(position=11.5, rate=2.0), 1000.0) == pytest.approx(0.25)
+    assert next_word_boundary(state(), 1000.0, lead=0.0) == pytest.approx(1.5)  # start of "two"
+    assert next_word_boundary(state(position=11.5), 1000.0, lead=0.0) == pytest.approx(
+        0.5
+    )  # start of "two"
+    assert next_word_boundary(state(position=11.5, rate=2.0), 1000.0, lead=0.0) == pytest.approx(
+        0.25
+    )
     # after the last word: wake at the gap-hide boundary (13.0 + GAP)
-    assert next_word_boundary(state(position=13.5), 1000.0) == pytest.approx(GAP_HIDE_SECONDS - 0.5)
-    assert next_word_boundary(state(position=13.0 + GAP_HIDE_SECONDS + 1), 1000.0) is None
+    assert next_word_boundary(state(position=13.5), 1000.0, lead=0.0) == pytest.approx(
+        GAP_HIDE_SECONDS - 0.5
+    )
+    assert next_word_boundary(state(position=13.0 + GAP_HIDE_SECONDS + 1), 1000.0, lead=0.0) is None
     assert next_word_boundary(state(status="paused"), 1000.0) is None
     assert next_word_boundary(None, 1000.0) is None
 
@@ -250,3 +256,101 @@ def test_word_styles_mix_and_stagger_stays_small():
 
     assert {word_style("line", i) for i in range(30)} == {"bold", "serif", "medium"}
     assert all(abs(stagger("line", i, 1000)) <= 25 for i in range(30))
+
+
+def test_lead_lights_words_a_touch_early():
+    from encorelib.lyricview import LEAD_SECONDS, build_view, current_word_index, next_word_boundary
+
+    assert 0.08 <= LEAD_SECONDS <= 0.16
+    state = {
+        "status": "playing",
+        "position": 9.9,
+        "ts": 100.0,
+        "rate": 1.0,
+        "track": {"key": "k"},
+        "lyrics": {"sync": "word"},
+        "line": {
+            "index": 0,
+            "start": 10.0,
+            "end": 14.0,
+            "text": "one two",
+            "words": [
+                {"text": "one", "start": 10.0, "end": 11.0},
+                {"text": "two", "start": 11.0, "end": 12.0},
+            ],
+        },
+    }
+    # 0.1 s before the word by the clock, but inside the lead: lit
+    assert current_word_index(build_view(state, now=100.0)) == 0
+    # the next boundary is the second word, measured with the same lead
+    assert abs(next_word_boundary(state, now=100.0) - (11.0 - 9.9 - LEAD_SECONDS)) < 1e-6
+    early = dict(state, position=9.7)
+    assert current_word_index(build_view(early, now=100.0)) == -1
+
+
+def test_column_slots_follow_the_reference_proportions():
+    from encorelib.lyricview import COLUMN_BASE, SLOT_SCALE
+
+    # the word being sung sits nearly as big as the word just sung (Verci's hero:
+    # about 0.8), the word before it small; the column unit is a tenth of the height
+    assert 0.75 <= SLOT_SCALE[0] / SLOT_SCALE[1] <= 0.85
+    assert SLOT_SCALE[2] < SLOT_SCALE[0] < SLOT_SCALE[1]
+    assert COLUMN_BASE == pytest.approx(0.10)
+
+
+def test_fit_zoom_keeps_a_word_inside_its_room():
+    from encorelib.lyricview import fit_zoom
+
+    assert fit_zoom(1.2, 500.0, 900.0) == 1.2  # fits: untouched
+    assert fit_zoom(1.2, 1000.0, 900.0) == pytest.approx(0.9)  # 1000 px at 1.2 would be 1200
+    assert fit_zoom(1.0, 0.0, 900.0) == 1.0
+
+
+def test_column_change_starts_the_right_motion():
+    from encorelib.lyricview import column_change
+
+    words = ("I", "call", "your")
+    # the next word of the same line: it pops and the column slides
+    c = column_change(("k1", words, 1, True), "k1", words, 2, True, exits=True)
+    assert c.pop and c.slide and c.exit is None
+    # a new line: the old column leaves with ITS words and word, the new one pops
+    c = column_change(("k1", words, 2, True), "k2", ("Every",), 0, True, exits=True)
+    assert c.pop and not c.slide and c.exit == ("k1", words, 2)
+    # after a gap (the old line was hidden) nothing leaves
+    c = column_change(("k1", words, 2, False), "k2", ("Every",), 0, True, exits=True)
+    assert c.exit is None
+    # the code style has no exit; nothing changes, nothing starts
+    assert (
+        column_change(("k1", words, 2, True), "k2", ("Every",), 0, True, exits=False).exit is None
+    )
+    assert column_change(("k1", words, 2, True), "k1", words, 2, True, exits=True) is None
+    assert column_change(("k1", words, 2, True), "k2", (), None, False, exits=True) is None
+
+
+def test_column_slot_keeps_a_lone_first_word_in_place():
+    from encorelib.lyricview import column_slot
+
+    assert column_slot(0, 0, 0.3) == 1.0  # the first word sits big in the middle
+    # the second word arrives: the first stays in the middle, no jump to the bottom
+    assert column_slot(1, 0, 0.0) == 1.0 and column_slot(1, 0, 1.0) == 1.0
+    assert column_slot(1, 1, 0.0) == -1.0 and column_slot(1, 1, 1.0) == 0.0
+    assert column_slot(3, 1, 0.5) == 1.5
+    assert column_slot(3, 1, 1.1) == pytest.approx(2.1)  # the spring's overshoot
+    assert column_slot(5, 0, 1.0) == 3.0  # clamped: gone
+
+
+def test_line_unit_is_bigger_on_the_show_than_on_the_desktop_strip():
+    from encorelib.lyricview import line_unit
+
+    assert line_unit(1080, 30, desktop=True) == 43  # 4% of the height
+    assert line_unit(1080, 30, desktop=False) == 60  # the show: Apple Music sized
+    assert line_unit(1080, 60, desktop=False) == 121
+    assert line_unit(100, 30, desktop=True) == 16  # never unreadable
+
+
+def test_line_x_centers_the_line_on_its_canvas():
+    from encorelib.lyricview import line_x
+
+    assert line_x(1920, 1536) == 192  # the 80% line, centred on Full screen
+    assert line_x(1536, 1536) == 0  # the desktop strip is the line's own width
+    assert line_x(800, 1000) == 0

@@ -111,3 +111,21 @@ def test_ensure_daemon_starts_from_home_and_clears_a_failed_unit(tmp_path):
     ]
     # app2unit starts units with --same-dir: a cwd that later vanishes breaks restarts
     assert all(kw.get("cwd") == Path.home() for kw in run.kwargs)
+
+
+def test_ensure_daemon_never_touches_units_in_tests(tmp_path):
+    calls, fell_back = [], []
+
+    def run(cmd, **_kw):
+        calls.append(cmd)
+        raise AssertionError("a unit command ran")
+
+    result = ensure_daemon(
+        tmp_path / "encore.sock",
+        "Hyprland",
+        run=run,
+        fallback=lambda: fell_back.append(True),
+        env={"ENCORE_NO_UNIT": "1"},
+    )
+    assert result == "fallback"
+    assert calls == [] and fell_back == [True]

@@ -13,14 +13,37 @@ def _allowed(name: str, allow: tuple[str, ...]) -> bool:
     return not allow or any(name == a or name.startswith(f"{a}.") for a in allow)
 
 
-def pick_player(players: list[tuple[str, str]], allow: tuple[str, ...]) -> str | None:
-    """First playing player, else first paused one; stopped players never win."""
+def pick_player(
+    players: list[tuple[str, str]], allow: tuple[str, ...], pin: str | None = None
+) -> str | None:
+    """The pinned player when present, else the first playing player, else the
+    first paused one; stopped players never win on their own.
+
+    A pin is the user picking a player by hand, so it beats the allow list
+    and the playback status. It matches an instance or its base name.
+    """
+    if pin:
+        for name, _status in players:
+            if _allowed(name, (pin,)):
+                return name
     candidates = [(name, status) for name, status in players if _allowed(name, allow)]
     for wanted in ("Playing", "Paused"):
         for name, status in candidates:
             if status == wanted:
                 return name
     return None
+
+
+# names that do not title-case well
+_LABELS = {"vlc": "VLC", "mpv": "mpv", "kdeconnect": "KDE Connect", "tidal-hifi": "TIDAL"}
+
+
+def player_label(instance: str) -> str:
+    """A player's display name: "brave.instance1234" -> "Brave"; empty is Automatic."""
+    base = instance.split(".", 1)[0].strip()
+    if not base:
+        return "Automatic"
+    return _LABELS.get(base.lower(), " ".join(base.replace("_", " ").split()).title())
 
 
 class FetchGate:
@@ -38,6 +61,25 @@ class FetchGate:
 
     def accept(self, token: int, key: str) -> bool:
         return token == self._token and key == self._key
+
+
+class Quiet:
+    """Speak about a recurring trouble once per interval: the first failure logs,
+    repeats stay quiet until the interval passes or the trouble clears."""
+
+    def __init__(self, interval: float = 60.0):
+        self.interval = interval
+        self._last: dict[str, float] = {}
+
+    def should(self, key: str, now: float) -> bool:
+        last = self._last.get(key)
+        if last is not None and now - last < self.interval:
+            return False
+        self._last[key] = now
+        return True
+
+    def clear(self, key: str) -> None:
+        self._last.pop(key, None)
 
 
 def order_by_recency(names: list[str], recent: list[str]) -> list[str]:

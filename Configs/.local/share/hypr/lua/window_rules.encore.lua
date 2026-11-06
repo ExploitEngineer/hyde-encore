@@ -1,14 +1,14 @@
 -- Fragment for upstream Configs/.local/share/hypr/lua/window_rules.lua.
--- The encore player is a floating, centered app window.
+-- The Encore window floats, centered, at its designed size; full screen still works.
 hl.window_rule(
   {
-    name = "encore_player",
+    name = "encore_app",
     match = {
-      class = "^org\\.hyde\\.encore\\.player$"
+      class = "^org\\.hyde\\.encore$"
     },
     float = true,
     center = true,
-    size = "960 660",
+    size = "960 760",
     opacity = "1.0 override 1.0 override"
   }
 )

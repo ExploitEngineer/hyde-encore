@@ -97,7 +97,10 @@ class Harness:
             _stop(self.bus)
             raise RuntimeError("dbus-daemon printed no address")
         base = Path(f"/run/user/{os.getuid()}")
-        self.run = Path(tempfile.mkdtemp(prefix="enc-", dir=base if base.is_dir() else None))
+        # the user's runtime tmpfs is small (and shared): fall back to /tmp when it
+        # has no room, or every test fails with "No space left on device"
+        roomy = base.is_dir() and shutil.disk_usage(base).free > 64 * 1024 * 1024
+        self.run = Path(tempfile.mkdtemp(prefix="enc-", dir=base if roomy else None))
         for name in ("cache", "state", "lyrics", "logs"):
             (self.tmp / name).mkdir(parents=True, exist_ok=True)
         env = {k: v for k, v in os.environ.items() if not k.startswith("ENCORE_")}
@@ -116,6 +119,8 @@ class Harness:
             XDG_STATE_HOME=str(self.tmp / "state"),
             ENCORE_LYRICS_DIRS=str(self.tmp / "lyrics"),
             ENCORE_LYRICS_LRCLIB="false",  # tests never reach the network
+            ENCORE_HD_COVERS="false",  # no Apple lookups either
+            ENCORE_NO_UNIT="1",  # a restart never starts the owner's real encore unit
             ENCORE_LYRICS_SPICY_KEY="",
             SPICY_LYRICS_SECRET_KEY="",
         )

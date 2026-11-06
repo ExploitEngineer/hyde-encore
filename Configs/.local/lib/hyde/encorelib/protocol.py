@@ -6,6 +6,7 @@ status is "playing"; ts is time.monotonic(), shared across processes.
 
 from __future__ import annotations
 
+import errno
 import html
 import json
 import socket
@@ -29,7 +30,12 @@ def build_state(
     lyrics: Lyrics | None,
     clock: PlaybackClock,
     palette: dict[str, str],
+    cover: Path | None = None,
+    players: tuple[str, ...] | list[str] = (),
+    volume: float | None = None,
+    lookup: str | None = None,
 ) -> dict:
+    """The state line; `art` is the 512 px lock copy, `cover` the best full-size cover."""
     position, ts = clock.anchor()
     line = nxt = gap = None
     if lyrics is not None and lyrics.sync != "none":
@@ -59,6 +65,8 @@ def build_state(
         "ts": ts,
         "status": status,
         "player": track.player if track else None,
+        "players": list(players),  # every MPRIS player present, most recent first
+        "volume": volume,  # the followed player's 0-1 volume; None when it has none
         "track": (
             {
                 "key": track_key(track),
@@ -67,10 +75,14 @@ def build_state(
                 "album": track.album,
                 "length": track.length,
                 "art": str(art) if art else None,
+                "cover": str(cover or art) if (cover or art) else None,
             }
             if track
             else None
         ),
+        # "pending" while this track's lyrics lookup runs, "done" after it,
+        # so clients can tell "looking" from "nothing found"
+        "lookup": lookup,
         "lyrics": (
             {
                 "sync": lyrics.sync,
@@ -154,10 +166,23 @@ class StateServer:
         self.sock.setblocking(False)
         return self.sock
 
+    def _accept_one(self) -> socket.socket:
+        client, _ = self.sock.accept()
+        return client
+
     def accept(self) -> None:
         try:
-            client, _ = self.sock.accept()
+            client = self._accept_one()
         except BlockingIOError:
+            return
+        except OSError as error:
+            # out of descriptors (EMFILE/ENFILE) or a peer gone before we got to
+            # it: never let it escape the listener's watch. Hung-up pollers go
+            # first; if the table is still full the oldest client makes room,
+            # and the connection waits in the backlog for the next wake
+            self._drop_hung_up()
+            if error.errno in (errno.EMFILE, errno.ENFILE) and self.clients:
+                self.clients.pop(0).close()
             return
         client.setblocking(False)
         self._drop_hung_up()

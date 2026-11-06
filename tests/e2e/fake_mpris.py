@@ -40,7 +40,7 @@ XML = """
     <property name="Metadata" type="a{sv}" access="read"/>
     <property name="Position" type="x" access="read"/>
     <property name="Rate" type="d" access="readwrite"/>
-    <property name="Volume" type="d" access="read"/>
+    <property name="Volume" type="d" access="readwrite"/>
     <property name="CanGoNext" type="b" access="read"/>
     <property name="CanGoPrevious" type="b" access="read"/>
     <property name="CanPlay" type="b" access="read"/>
@@ -59,9 +59,10 @@ PLAYER_IFACE = "org.mpris.MediaPlayer2.Player"
 
 
 class FakePlayer:
-    def __init__(self, conn: Gio.DBusConnection, art: str):
+    def __init__(self, conn: Gio.DBusConnection, art: str, volume: bool = True):
         self.conn = conn
         self.art = art
+        self.volume = 1.0 if volume else None  # None: the player offers no Volume
         self.index = 0
         self.status = "Paused"
         self.base = 0.0
@@ -140,11 +141,17 @@ class FakePlayer:
             "Metadata": self.metadata(),
             "Position": GLib.Variant("x", int(self.position() * 1e6)),
             "Rate": GLib.Variant("d", self.rate),
-            "Volume": GLib.Variant("d", 1.0),
         }
+        if prop == "Volume":
+            # None makes GDBus fail Get and leave Volume out of GetAll
+            return GLib.Variant("d", self.volume) if self.volume is not None else None
         return values.get(prop, GLib.Variant("b", True))
 
     def set(self, _c, _s, _p, _i, prop, value) -> bool:
+        if prop == "Volume" and self.volume is not None:
+            self.volume = max(0.0, min(1.0, value.unpack()))
+            self.changed(Volume=GLib.Variant("d", self.volume))
+            return True
         if prop != "Rate":
             return False
         self.set_position(self.position())  # re-anchor before the speed changes
@@ -157,10 +164,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--art", default="", help="absolute path to a cover image")
     parser.add_argument("--name", default="encoretest", help="MPRIS bus name suffix")
+    parser.add_argument("--no-volume", action="store_true", help="offer no MPRIS Volume")
+    parser.add_argument("--title", default="", help="replace the first track's title")
+    parser.add_argument("--artist", default="", help="replace the first track's artist")
     args = parser.parse_args()
+    title, artist, album, length = TRACKS[0]
+    TRACKS[0] = (args.title or title, args.artist or artist, album, length)
     node = Gio.DBusNodeInfo.new_for_xml(XML)
     conn = Gio.bus_get_sync(Gio.BusType.SESSION)
-    player = FakePlayer(conn, args.art)
+    player = FakePlayer(conn, args.art, volume=not args.no_volume)
     for iface in node.interfaces:
         conn.register_object("/org/mpris/MediaPlayer2", iface, player.call, player.get, player.set)
     Gio.bus_own_name_on_connection(

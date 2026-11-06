@@ -64,12 +64,17 @@ CHAIN_MIN_STEP = 0.11
 CHAIN_MAX_STEP = 0.24
 
 
-def chain_words(words: list[str], width: int, height: int, seed: str) -> list[tuple[float, float]]:
+def chain_words(
+    words: list[str], width: int, height: int, seed: str, word_px: float = 0.0
+) -> list[tuple[float, float]]:
     """Verci-style chain: each word lands near the previous one.
 
     A random walk with bounded steps, biased to meander rightward and
     reflected back into a center band, so the cluster stays compact and
-    readable instead of scattering over the whole screen.
+    readable instead of scattering over the whole screen. With `word_px`
+    (the newest word's type size; older words are drawn at half) each step
+    also clears both words' half widths, so a big word never lands on the
+    last one.
     """
     rng = _rng(f"chain:{seed}")
     min_step, max_step = CHAIN_MIN_STEP * height, CHAIN_MAX_STEP * height
@@ -100,8 +105,30 @@ def chain_words(words: list[str], width: int, height: int, seed: str) -> list[tu
                 angle = rng.uniform(0, 2 * math.pi)
                 x = max(x_lo, min(x_hi, px + min_step * 1.1 * math.cos(angle)))
                 y = max(y_lo, min(y_hi, py + min_step * 1.1 * math.sin(angle)))
+        if word_px > 0:
+            prev, cur = words[len(out) - 1], words[len(out)]
+            need_x = 0.3 * word_px * (0.5 * len(prev) + len(cur))
+            x, y = _clear((px, py), (x, y), need_x, word_px * 0.9, (x_lo, x_hi, y_lo, y_hi))
         out.append((x, y))
     return _centered(out, width, height, (x_lo, x_hi, y_lo, y_hi))
+
+
+def _clear(prev, point, need_x, need_y, band) -> tuple[float, float]:
+    """Move `point` until its word clears the previous one: sideways first,
+    then up or down when the band has no room."""
+    (px, py), (x, y) = prev, point
+    x_lo, x_hi, y_lo, y_hi = band
+    if abs(x - px) >= need_x or abs(y - py) >= need_y:
+        return x, y
+    for side in (1 if x >= px else -1, -1 if x >= px else 1):
+        nx = px + side * need_x
+        if x_lo <= nx <= x_hi:
+            return nx, y
+    for side in (1 if y >= py else -1, -1 if y >= py else 1):
+        ny = py + side * need_y
+        if y_lo <= ny <= y_hi:
+            return x, ny
+    return x, y
 
 
 def _centered(points, width, height, band) -> list[tuple[float, float]]:

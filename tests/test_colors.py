@@ -1,4 +1,14 @@
-from encorelib.colors import DEFAULT_ACCENT, scheme
+import pytest
+
+from encorelib.colors import (
+    BASE,
+    DEFAULT_ACCENT,
+    blob_colors,
+    block_for,
+    luminance,
+    resolve,
+    scheme,
+)
 from encorelib.palette import contrast_ratio
 
 VIVID = {"1xa8": "D4407A", "2xa8": "E8A0C0", "3xa8": "4A90D9", "pry1": "1A1014", "txt1": "FFFFFF"}
@@ -123,3 +133,65 @@ def test_barely_tinted_grey_falls_back_to_the_theme():
     tinted_grey = {f"1xa{i}": c for i, c in enumerate(["B0B0C8", "9898AC", "707080"], 1)}
     s = scheme(tinted_grey, THEME)
     assert s.source == "theme"
+
+
+COVERS = {
+    "white": "FFFFFF",
+    "black": "000000",
+    "red": "FF0000",
+    "deep blue": "1020A0",
+    "yellow": "F0E040",
+    "grey": "808080",
+    "teal": "1FA39A",
+    "pale pink": "F4D6E0",
+    "lime": "B6FF00",
+}
+
+
+def _cover(color: str) -> dict[str, str]:
+    return {"1xa8": color, "2xa8": color, "pry1": "101010", "txt1": "FFFFFF"}
+
+
+@pytest.mark.parametrize("name", COVERS)
+def test_floor_holds_on_extreme_covers(name):
+    s = scheme(_cover(COVERS[name]), {})
+    assert contrast_ratio(s.lyric, BASE) >= 7.0
+    assert contrast_ratio(s.on_highlight, s.highlight) >= 4.5
+    assert 2.5 <= contrast_ratio(s.secondary, BASE) <= 4.0
+
+
+def test_floor_moves_the_text_never_the_block():
+    for color in COVERS.values():
+        s = scheme(_cover(color), THEME)
+        assert s.highlight == block_for(s.accent)
+
+
+def test_user_colors_are_kept_but_the_block_text_reads():
+    s = scheme(VIVID, THEME)
+    r = resolve(s, {"lyric_color": "#333333", "highlight_color": "#7A7A7A"}, "")
+    assert r.lyric == "333333"  # the user's pick stands
+    assert r.highlight == "7A7A7A"
+    assert contrast_ratio(r.on_highlight, r.highlight) >= 4.5
+
+
+@pytest.mark.parametrize("gradient", [1, 2])
+@pytest.mark.parametrize("name", COVERS)
+def test_blob_colors_are_capped_so_type_reads(gradient, name):
+    s = scheme(_cover(COVERS[name]), THEME)
+    blobs = blob_colors(s, gradient)
+    assert len(blobs) == 3
+    assert all(luminance(c) <= 0.28 + 1e-9 for c in blobs)
+
+
+def test_gradient_one_is_the_accent_alone_two_adds_the_second():
+    s = scheme(VIVID, THEME)
+    one, two = blob_colors(s, 1), blob_colors(s, 2)
+    assert len(set(one)) == 1
+    assert len(set(two)) == 2
+    assert two[0] == one[0]
+
+
+@pytest.mark.parametrize("color", ["4A90D9", "D4407A", "8A4FD0"])
+def test_saturated_blocks_carry_light_text_like_the_reference(color):
+    s = scheme(_cover(color), THEME)
+    assert s.on_highlight == "FFFFFF"

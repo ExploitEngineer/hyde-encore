@@ -70,3 +70,22 @@ def test_release_only_own_claim(tmp_path):
     claim(p)
     release(p)
     assert not p.exists()
+
+
+def test_claim_holds_the_lock_when_the_pid_cannot_be_written(tmp_path, monkeypatch):
+    # a full runtime dir (ENOSPC) must not make a surface think another one
+    # runs: the flock is the lock, the pid text is a courtesy
+    import errno
+
+    from encorelib import single
+
+    def full(_handle):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(single, "_record", full)
+    p = tmp_path / "pid"
+    assert claim(p) is True
+    assert claim(p) is False  # the lock is held
+    release(p)
+    monkeypatch.undo()
+    assert claim(p) is True

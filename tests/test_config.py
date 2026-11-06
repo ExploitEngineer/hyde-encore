@@ -52,6 +52,12 @@ def test_false_boolean(tmp_path):
     assert cfg.lrclib is False
 
 
+def test_hd_covers_default_on_and_env_off(tmp_path):
+    assert load_config(env=HOME, env_file=tmp_path / "x").hd_covers is True
+    cfg = load_config(env={**HOME, "ENCORE_HD_COVERS": "false"}, env_file=tmp_path / "x")
+    assert cfg.hd_covers is False
+
+
 def test_players_comma_list(tmp_path):
     cfg = load_config(env={**HOME, "ENCORE_PLAYERS": "spotify, mpv"}, env_file=tmp_path / "x")
     assert cfg.players == ("spotify", "mpv")
@@ -153,3 +159,13 @@ def test_glow_monitor(tmp_path):
     assert load_config(env=HOME, env_file=tmp_path / "x").glow_monitor == ""
     env = {**HOME, "ENCORE_GLOW_MONITOR": "HDMI-A-1"}
     assert load_config(env=env, env_file=tmp_path / "x").glow_monitor == "HDMI-A-1"
+
+
+def test_schema_and_config_document_every_style():
+    from encorelib.stream import STYLES
+
+    schema = Path(__file__).resolve().parent.parent / "Configs/.local/share/hyde/schema"
+    for name in ("schema.toml", "config.toml"):
+        line = next(ln for ln in (schema / name).read_text().splitlines() if "Overlay style:" in ln)
+        for style in STYLES:
+            assert style in line, (name, style)

@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import zlib
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from .timing import GAP_HOLD_SECONDS
 
 GAP_HIDE_SECONDS = GAP_HOLD_SECONDS
+# words light a touch before their timestamp, as the ear expects (Verso leads by 160 ms)
+LEAD_SECONDS = 0.12
 FILL_FPS_HINT = 60
 
 
@@ -44,7 +47,7 @@ def _fill(position: float, start: float, end: float) -> float:
     return min(1.0, max(0.0, (position - start) / (end - start)))
 
 
-def build_view(state: dict | None, now: float) -> View:
+def build_view(state: dict | None, now: float, lead: float = LEAD_SECONDS) -> View:
     if not state or state.get("status") == "stopped":
         return HIDDEN
     lyrics, line, track = state.get("lyrics"), state.get("line"), state.get("track")
@@ -54,7 +57,7 @@ def build_view(state: dict | None, now: float) -> View:
     if not words:
         return HIDDEN
 
-    position = live_position(state, now)
+    position = live_position(state, now) + lead
     rate = state.get("rate", 1.0) or 1.0
     playing = state.get("status") == "playing"
 
@@ -122,13 +125,13 @@ def current_word_index(view: View) -> int:
     return index
 
 
-def next_word_boundary(state: dict | None, now: float) -> float | None:
+def next_word_boundary(state: dict | None, now: float, lead: float = LEAD_SECONDS) -> float | None:
     """Wall seconds until the next word start or end, while playing."""
     if not state or state.get("status") != "playing":
         return None
     line = state.get("line") or {}
     words = line.get("words") or []
-    position = live_position(state, now)
+    position = live_position(state, now) + lead
     rate = state.get("rate", 1.0) or 1.0
     # only word STARTS change what is on screen; ends inside a line do not,
     # except the LAST end, which starts the gap-hide countdown
@@ -155,3 +158,83 @@ def word_style(line_key: str, index: int) -> str:
 def stagger(line_key: str, index: int, width: float) -> float:
     """Horizontal zig-zag of a column word, up to 2.5% of the width each way."""
     return (_stable_unit(line_key, "x", index) - 0.5) * width * 0.05
+
+
+# The rolling column (stack and visual): slot -1 is the word arriving from
+# below, 0 the word being sung (on visual's Highlight block), 1 the word just
+# sung, big, 2 the word before it, 3 leaving. Read off Verci's hero frames:
+# the sung word is about 0.8 of the big one, and the unit is a tenth of the
+# screen height at the default text size.
+SLOT_SCALE = {-1: 1.2, 0: 1.9, 1: 2.4, 2: 0.85, 3: 0.6}
+SLOT_ALPHA = {-1: 0.6, 0: 1.0, 1: 1.0, 2: 0.62, 3: 0.0}
+COLUMN_BASE = 0.10
+
+
+def fit_zoom(zoom: float, width: float, room: float) -> float:
+    """The zoom a word of `width` px is drawn at so it never exceeds `room` px."""
+    if width <= 0 or width * zoom <= room:
+        return zoom
+    return room / width
+
+
+class ColumnChange(NamedTuple):
+    pop: bool  # the word being sung pops in
+    slide: bool  # the column pushes up one slot
+    exit: tuple[str, tuple[str, ...], int] | None  # the old line's (key, words, word) leaving
+
+
+def column_change(
+    prev: tuple[str, tuple[str, ...], int | None, bool],
+    key: str,
+    words: tuple[str, ...],
+    ix: int | None,
+    visible: bool,
+    exits: bool,
+) -> ColumnChange | None:
+    """What motion a new view starts in the column and constellation styles.
+
+    `prev` is the line last seen: (key, words, word index, was visible). A new
+    line sends the old one out with its own words, unless it was already
+    hidden (a gap) or the style has no exit; None when nothing changed.
+    """
+    prev_key, prev_words, prev_ix, prev_visible = prev
+    if not visible or (ix, key) == (prev_ix, prev_key):
+        return None
+    exit = None
+    slide = False
+    if key != prev_key:
+        if exits and prev_visible and prev_words and prev_ix is not None and prev_ix >= 0:
+            exit = (prev_key, prev_words, prev_ix)
+    elif ix is not None and prev_ix is not None and ix > prev_ix:
+        slide = True
+    return ColumnChange(ix is not None and ix >= 0, slide, exit)
+
+
+def column_slot(ix: int, i: int, slide: float) -> float:
+    """Where word `i` sits while word `ix` is sung, `slide` (0..1, may overshoot)
+    into the push that `ix` started: 0 sung, 1 just sung (big), 2 before, 3 gone.
+
+    The first word of a line sits alone in the big slot; when the second
+    arrives it stays there instead of dropping back to slide up again.
+    """
+    if ix == 0:
+        return 1.0
+    target = ix - i
+    before = 1 if (ix == 1 and i == 0) else target - 1
+    return max(-1.0, min(3.0, before + (target - before) * slide))
+
+
+LINE_UNIT_DESKTOP = 0.040  # the desktop strip: a line that sits on the wallpaper
+LINE_UNIT_SHOW = 0.056  # the Stage and Full screen: the line is the show
+
+
+def line_unit(height: int, size: int, desktop: bool) -> int:
+    """The line style's type size in px (and the unit the constellation and
+    code styles scale from): a share of the screen height at text size 30."""
+    share = LINE_UNIT_DESKTOP if desktop else LINE_UNIT_SHOW
+    return max(16, round(height * share * size / 30))
+
+
+def line_x(canvas_width: float, line_width: float) -> float:
+    """Where a line raster starts so it sits centred on its canvas."""
+    return max(0.0, (canvas_width - line_width) / 2)

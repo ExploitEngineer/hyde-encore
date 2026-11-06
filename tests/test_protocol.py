@@ -44,6 +44,7 @@ def test_build_state_schema():
         "album": "Album",
         "length": 200.0,
         "art": "/c.png",
+        "cover": "/c.png",
     }
     assert len(state["track"]["key"]) == 40
     assert state["lyrics"]["sync"] == "word"
@@ -59,6 +60,25 @@ def test_build_state_schema():
     assert state["line"]["words"][1] == {"text": "two", "start": 11, "end": 12}
     assert state["next"] == "next line"
     assert state["palette"] == {"pry1": "000000"}
+
+
+def test_state_carries_cover():
+    state = build_state(
+        "playing", TRACK, Path("/c/lock.png"), None, clock_at(1), {}, cover=Path("/c/full.jpg")
+    )
+    assert state["track"]["cover"] == "/c/full.jpg"
+    assert state["track"]["art"] == "/c/lock.png"
+
+
+def test_cover_falls_back_to_art():
+    state = build_state("playing", TRACK, Path("/c/lock.png"), None, clock_at(1), {})
+    assert state["track"]["cover"] == "/c/lock.png"
+
+
+def test_state_carries_lookup():
+    pending = build_state("playing", TRACK, None, None, clock_at(1), {}, lookup="pending")
+    assert pending["lookup"] == "pending"
+    assert build_state("stopped", None, None, None, clock_at(0, False), {})["lookup"] is None
 
 
 def test_build_state_no_track():
